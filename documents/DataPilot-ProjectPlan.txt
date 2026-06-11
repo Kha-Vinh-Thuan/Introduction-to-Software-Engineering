@@ -1,0 +1,717 @@
+================================================================================
+  DATAPILOT — KẾ HOẠCH DỰ ÁN ĐẠT 10/10
+  Kết quả brainstorm + debate từ Agent A (Pragmatist) vs Agent B (Critic)
+  Ngày tạo: 2026-06-08
+  Team: 3 người (fresher/intern level) | Timeline: 8 tuần
+================================================================================
+
+--- QUÁ TRÌNH BRAINSTORM & DEBATE ---
+
+Agent A đề xuất 3 dự án:
+  1. DevAssist — AI Code Review & Debugging Agent
+  2. MeetMind — AI Meeting Agent with Live Tools
+  3. DataPilot — Conversational Data Analysis Agent
+
+Agent B chấm điểm sau debate:
+  - DevAssist  → ACCEPT với điều kiện (demo fragile, scope over-committed)
+  - MeetMind   → REJECT (OAuth integration tax giết timeline 8 tuần)
+  - DataPilot  → GREENLIGHT (dependency an toàn nhất, LLM genuinely load-bearing)
+
+Cả hai agent đồng thuận: DataPilot là lựa chọn tốt nhất cho team 3 người
+fresher/intern trong 8 tuần để đạt 10/10.
+
+================================================================================
+  PHẦN 1: TỔNG QUAN DỰ ÁN
+================================================================================
+
+TÊN DỰ ÁN: DataPilot
+
+PITCH:
+"Hỏi dữ liệu bằng tiếng tự nhiên — DataPilot dịch câu hỏi của bạn thành SQL,
+chạy truy vấn trên SQLite, và trả lời bằng lời văn rõ ràng, kèm báo cáo tuần
+tự động."
+
+TẠI SAO ĐẠT 10/10 (giải thích kỹ thuật):
+
+Thang điểm theo README:
+  - Old school, ko smart            → max 7
+  - Smart, ko LLM                   → max 8.5
+  - Smart, LLM wrapper              → max 9
+  - Smart, LLM là main program,
+    cung cấp tools/API/MCP/skills   → max 10
+
+DataPilot đạt 10/10 nhờ 3 lớp kỹ thuật thật sự:
+
+1. TOOL-USE LOOP THẬT SỰ (không phải fake):
+   Claude không chỉ sinh SQL và trả về. Claude *chạy tool* execute_sql, *nhận
+   kết quả thật*, rồi *tiếp tục suy luận* dựa trên kết quả đó. Đây là agentic
+   loop chuẩn — LLM là bộ não điều phối tool execution.
+
+2. MCP SERVER CHUẨN GIAO THỨC:
+   Backend expose dữ liệu qua Model Context Protocol server. Client AI đọc
+   resources (schema bảng) và gọi tools (execute_sql) thông qua JSON-RPC —
+   đúng cách Anthropic thiết kế cho AI agent truy cập data.
+
+3. SKILL = WORKFLOW CÓ TRẠNG THÁI:
+   Weekly report skill không chỉ gọi một tool — nó là chuỗi tool calls có
+   logic: lấy danh sách bảng → phân tích dữ liệu tuần → sinh báo cáo →
+   format kết quả. Đây là "compound tool use."
+
+Kết hợp ba lớp này = 10/10. Thiếu MCP hoặc thiếu skill loop = 9/10.
+
+================================================================================
+  PHẦN 2: KIẾN TRÚC HỆ THỐNG
+================================================================================
+
+SƠ ĐỒ KIẾN TRÚC (ASCII):
+
+  +-----------------------------------------------------------------+
+  |                    NGƯỜI DÙNG (Browser)                         |
+  |                 http://localhost:3000                           |
+  +----------------------------+------------------------------------+
+                               | HTTP (React fetch)
+                               v
+  +-----------------------------------------------------------------+
+  |                 REST API SERVER (FastAPI)                       |
+  |                 http://localhost:8000                           |
+  |                                                                 |
+  |  POST /api/chat          <- nhận câu hỏi, trả lời có tool calls |
+  |  GET  /api/report/weekly <- trigger weekly report skill         |
+  |  GET  /api/schema        <- danh sách bảng + cột                |
+  |  GET  /health            <- healthcheck                         |
+  |                                                                 |
+  |  +-------------------------------------------------------------+|
+  |  |           AGENT ORCHESTRATOR (Python)                       ||
+  |  |                                                             ||
+  |  |  1. Nhận message từ user                                    ||
+  |  |  2. Gọi Claude API với tool definitions                     ||
+  |  |  3. Claude trả về tool_use block                            ||
+  |  |  4. Orchestrator execute tool                               ||
+  |  |  5. Gửi tool_result về Claude                               ||
+  |  |  6. Lặp đến khi Claude trả về text cuối cùng                ||
+  |  +-------------------------------------------------------------+|
+  +-----------------------------------------------------------------+
+                               | JSON-RPC (MCP protocol)
+                               v
+  +-----------------------------------------------------------------+
+  |                 MCP SERVER (Python, stdio)                      |
+  |                                                                 |
+  |  resources/                                                     |
+  |    datapilot://tables          <- danh sách tên bảng            |
+  |    datapilot://schema/{table}  <- DDL của bảng cụ thể           |
+  |                                                                 |
+  |  tools/                                                         |
+  |    execute_sql    <- chạy SELECT query (read-only)              |
+  |    list_tables    <- liệt kê bảng                               |
+  |    describe_table <- mô tả cột, kiểu dữ liệu                    |
+  |                                                                 |
+  |  SQL SAFETY LAYER (3 lớp):                                      |
+  |    Lớp 1: SQLite URI mode=ro (file system level)                |
+  |    Lớp 2: sqlglot parser - chỉ cho phép SELECT                  |
+  |    Lớp 3: System prompt instruction                             |
+  |                          |                                      |
+  |                          v                                      |
+  |              northwind.db (SQLite file)                         |
+  +-----------------------------------------------------------------+
+
+LUỒNG TOOL-USE CỦA LLM (chi tiết):
+
+  User: "Top 5 sản phẩm bán chạy nhất là gì?"
+
+  Step 1: Orchestrator gửi message + tool definitions đến Claude
+
+  Step 2: Claude quyết định cần biết schema trước
+          -> tool_use { name: "list_tables" }
+
+  Step 3: Orchestrator gọi MCP tool list_tables
+          -> kết quả: ["Categories","Customers","OrderDetails",
+                       "Orders","Products","Suppliers",...]
+
+  Step 4: Claude quyết định cần schema OrderDetails và Products
+          -> tool_use { name: "describe_table", input: {table: "OrderDetails"} }
+
+  Step 5: Orchestrator gọi MCP, nhận column definitions
+
+  Step 6: Claude đủ thông tin, sinh SQL
+          -> tool_use { name: "execute_sql", input: { sql: "SELECT ..." } }
+
+  Step 7: Safety layer kiểm tra -> chỉ có SELECT -> cho phép
+          -> kết quả: [{ProductName: "Chai", total: 120}, ...]
+
+  Step 8: Claude tổng hợp câu trả lời tự nhiên
+          -> "Top 5 sản phẩm bán chạy: 1. Chai — 120 đơn vị..."
+
+  Orchestrator -> FastAPI -> Frontend -> Hiển thị
+
+================================================================================
+  PHẦN 3: TOOLS ĐỊNH NGHĨA (JSON Schema)
+================================================================================
+
+TOOL 1: list_tables
+{
+  "name": "list_tables",
+  "description": "Liệt kê tất cả các bảng có trong cơ sở dữ liệu.
+                  Luôn gọi tool này trước tiên.",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}
+
+TOOL 2: describe_table
+{
+  "name": "describe_table",
+  "description": "Trả về danh sách cột, kiểu dữ liệu, ràng buộc của một bảng.
+                  Gọi trước khi viết SQL.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "table_name": {
+        "type": "string",
+        "description": "Tên chính xác của bảng (phân biệt hoa/thường)"
+      }
+    },
+    "required": ["table_name"]
+  }
+}
+
+TOOL 3: execute_sql
+{
+  "name": "execute_sql",
+  "description": "Thực thi câu lệnh SELECT trên database. CHỈ SELECT.
+                  Tuyệt đối không INSERT/UPDATE/DELETE/DROP.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "sql": {
+        "type": "string",
+        "description": "Câu lệnh SQL SELECT hợp lệ với SQLite"
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Số dòng tối đa trả về (mặc định 100, tối đa 500)",
+        "default": 100,
+        "minimum": 1,
+        "maximum": 500
+      }
+    },
+    "required": ["sql"]
+  }
+}
+
+TOOL 4: generate_weekly_report (Skill Tool)
+{
+  "name": "generate_weekly_report",
+  "description": "Kích hoạt weekly report skill. Tự động: lấy bảng, phân tích
+                  7 ngày gần nhất, tính metrics, sinh báo cáo Markdown.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "report_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Ngày kết thúc tuần báo cáo (YYYY-MM-DD). Mặc định hôm nay."
+      }
+    },
+    "required": []
+  }
+}
+
+================================================================================
+  PHẦN 4: TECH STACK
+================================================================================
+
+BACKEND:
+  python       3.11.x    Runtime
+  fastapi      0.111.x   REST API framework
+  uvicorn      0.29.x    ASGI server
+  anthropic    0.28.x    Claude API SDK (tool use)
+  mcp          1.3.x     MCP server/client SDK chính thức của Anthropic
+  sqlglot      23.x      SQL parser để kiểm tra câu lệnh
+  pydantic     2.7.x     Data validation
+  python-dotenv 1.0.x    Quản lý biến môi trường
+  httpx        0.27.x    HTTP client async
+
+FRONTEND:
+  react          18.3.x  UI framework
+  typescript     5.4.x   Type safety
+  vite           5.2.x   Build tool
+  tailwindcss    3.4.x   Utility CSS
+  react-markdown 9.x     Render markdown trong chat
+  lucide-react   0.378.x Icon set
+
+DATABASE & DEVOPS:
+  sqlite3        built-in  Database engine
+  docker         24.x      Container hóa
+  docker-compose 2.x       Orchestrate services
+  pytest         8.x       Unit/integration test
+  pytest-asyncio 0.23.x    Test async code
+
+================================================================================
+  PHẦN 5: PHÂN CÔNG NHÓM (3 NGƯỜI)
+================================================================================
+
+NGUYÊN TẮC: Mỗi người sở hữu một LAYER DỌC — làm việc độc lập không bị block.
+Interface giữa các layer định nghĩa từ tuần 1.
+
+--- PERSON 1 — Backend & AI Orchestration ---
+
+Sở hữu:
+  - backend/           — toàn bộ FastAPI app
+  - backend/agent/     — tool-use loop với Claude
+  - backend/api/       — REST endpoints
+  - Docker Compose config
+  - .env management
+
+Nhiệm vụ theo tuần:
+  Tuần 1: FastAPI skeleton, POST /api/chat echo (không AI)
+  Tuần 2: Tích hợp Anthropic SDK, tool-use loop 2-3 vòng
+  Tuần 3: Kết nối MCP client vào tool-use loop
+  Tuần 4: Weekly report skill, GET /api/report/weekly
+  Tuần 5-6: Error handling, retry logic, rate limiting
+  Tuần 7-8: Demo support, fix bugs
+
+Interface với Person 2: Gọi MCP tools qua mcp.ClientSession.
+  Person B cung cấp tools_manifest.json với schema.
+  Person A dùng MockMCPClient trước khi Person B xong.
+
+Interface với Person 3: Định nghĩa response JSON format tuần 1.
+  Person C dùng MSW mock trước khi Person A xong real endpoint.
+
+--- PERSON 2 — MCP Server & Database ---
+
+Sở hữu:
+  - mcp_server/         — toàn bộ MCP server
+  - mcp_server/safety.py — SQL safety layer
+  - data/               — Northwind dataset + loader script
+  - Database schema documentation
+
+Nhiệm vụ theo tuần:
+  Tuần 1: Setup SQLite Northwind, viết loader script, verify data
+  Tuần 2: MCP server với list_tables và describe_table
+  Tuần 3: execute_sql với safety layer đầy đủ
+  Tuần 4: Unit tests safety layer (16 test cases — acceptance test)
+  Tuần 5-6: Query performance, row count metadata
+  Tuần 7-8: Demo support, edge case handling
+
+Interface với Person 1: Viết tools_manifest.json với tên tools + schema.
+
+--- PERSON 3 — Frontend & UX ---
+
+Sở hữu:
+  - frontend/              — toàn bộ React app
+  - Chat UI component
+  - Weekly report display component
+  - frontend/src/api/      — API client layer
+
+Nhiệm vụ theo tuần:
+  Tuần 1: Vite + React + TS + Tailwind, chat UI tĩnh
+  Tuần 2: Kết nối POST /api/chat với MSW mock, markdown rendering
+  Tuần 3: Tool call visualization ("Đang chạy SQL...")
+  Tuần 4: Weekly report page
+  Tuần 5-6: Responsive, loading/error states
+  Tuần 7-8: Demo polish, record demo video
+
+Cách tránh block: Dùng MSW (Mock Service Worker) từ tuần 1.
+
+COLLABORATION PROTOCOL:
+  Tuần 1, ngày 1: Cả 3 cùng viết interface contracts:
+    - REST API response format (Person 1 + 3)
+    - MCP tool manifest (Person 1 + 2)
+    - Database schema documentation (Person 2)
+
+  Daily standup: 15 phút/ngày
+  Code review: mỗi PR cần ít nhất 1 người khác approve
+  Branch: main (protected) / feature/person1-* / feature/person2-* / feature/person3-*
+
+================================================================================
+  PHẦN 6: KẾ HOẠCH 8 TUẦN
+================================================================================
+
+--- TUẦN 1: FOUNDATION — "Dựng khung, dựng dữ liệu" ---
+
+Goal: Cả 3 có thể chạy code local, có data thật, có interface contracts.
+
+Person 1:
+  [ ] Tạo repo, cấu trúc thư mục chuẩn
+  [ ] FastAPI app: GET /health -> {"status": "ok"}
+  [ ] POST /api/chat nhận JSON, trả echo (chưa có AI)
+  [ ] Docker Compose: service api + service mcp
+  [ ] Viết API_CONTRACT.md
+
+Person 2:
+  [ ] Download Northwind SQLite (xem Phần 8)
+  [ ] Viết data/load_northwind.py: verify 8 bảng + row counts
+  [ ] MCP server skeleton (khởi động được, 0 tools)
+  [ ] Viết TOOLS_MANIFEST.md: định nghĩa 3 tools với schema
+
+Person 3:
+  [ ] Vite + React + TS + Tailwind project setup
+  [ ] Chat UI: input box, message list, send button
+  [ ] MSW setup: mock POST /api/chat
+  [ ] Deploy tĩnh localhost:3000
+
+Deliverable cuối tuần 1:
+  docker-compose up -> 3 services lên
+  Browser -> chat UI -> gõ message -> nhận echo response
+  data/northwind.db đủ dữ liệu, verify bằng script
+
+--- TUẦN 2: AI INTEGRATION — "Cho AI nói chuyện" ---
+
+Goal: Claude trả lời câu hỏi đơn giản (không tool, chỉ text đã có schema).
+
+Person 1:
+  [ ] Tích hợp anthropic SDK vào /api/chat
+  [ ] System prompt mô tả DataPilot + hướng dẫn dùng tool
+  [ ] Tool-use loop cơ bản (tối đa 5 vòng)
+  [ ] .env với ANTHROPIC_API_KEY
+
+Person 2:
+  [ ] Implement list_tables trong MCP server
+  [ ] Implement describe_table (dùng PRAGMA table_info())
+  [ ] Unit test cho 2 tools này
+
+Person 3:
+  [ ] Kết nối real POST /api/chat (bỏ MSW cho chat)
+  [ ] Typing indicator khi chờ response
+  [ ] Style: user message (phải) vs AI message (trái)
+  [ ] Markdown rendering trong AI message
+
+Deliverable cuối tuần 2:
+  Hỏi "Có những bảng nào?" -> Claude trả lời đúng tên 8 bảng
+  Hỏi "Bảng Orders có cột gì?" -> Claude mô tả đúng
+
+--- TUẦN 3: SQL EXECUTION — "DataPilot thật sự chạy" ---
+
+Goal: Claude viết và chạy SQL thật, trả lời có số liệu.
+
+Person 1:
+  [ ] Dispatch execute_sql tool call trong loop
+  [ ] Handle tool error: SQL bị chặn -> gửi error về Claude tự sửa
+  [ ] GET /api/schema: full schema summary
+
+Person 2:
+  [ ] Implement execute_sql với full safety layer (3 lớp)
+  [ ] sqlglot parser chặn non-SELECT
+  [ ] SQLite connection mode=ro
+  [ ] Unit tests: 10 test cases safety layer
+  [ ] Integration test với query thật
+
+Person 3:
+  [ ] Hiển thị "AI đang xử lý..." khi tool chạy
+  [ ] Tool call badge: "DataPilot đang chạy SQL..."
+  [ ] Hiển thị kết quả dạng bảng
+  [ ] Copy button cho SQL query
+
+Deliverable cuối tuần 3:
+  Hỏi "Top 3 khách hàng mua nhiều nhất?" -> SQL chạy, kết quả đúng
+  Thử "DROP TABLE Products" -> bị chặn an toàn
+
+--- TUẦN 4: WEEKLY REPORT SKILL ---
+
+Goal: Skill hoạt động. Acceptance test PASS.
+
+Person 1:
+  [ ] GET /api/report/weekly endpoint
+  [ ] Weekly report skill logic:
+       1. Gọi list_tables
+       2. Query dữ liệu 7 ngày gần nhất
+       3. Tổng hợp: đơn hàng, top sản phẩm, top khách hàng, doanh thu
+       4. Gửi summary về Claude viết report text
+  [ ] Report format Markdown cố định
+
+Person 2:
+  [ ] Hỗ trợ SQL queries cho weekly report
+  [ ] Index trên date columns cho performance
+
+Person 3:
+  [ ] Weekly Report page: route /report
+  [ ] Render Markdown report
+  [ ] "Tải báo cáo tuần" button trong header
+
+================================================================================
+  ACCEPTANCE TEST TUẦN 4 (PHẢI PASS TRƯỚC KHI TIẾP TỤC)
+================================================================================
+
+Chạy: pytest tests/test_acceptance_week4.py -v
+Điều kiện: TẤT CẢ 16 test cases PASSED
+
+TEST SET 1: SQL Safety Layer (10 tests)
+  test_select_is_allowed          -> SELECT đơn giản phải được phép
+  test_insert_is_blocked          -> INSERT phải bị chặn
+  test_drop_is_blocked            -> DROP TABLE phải bị chặn
+  test_update_is_blocked          -> UPDATE phải bị chặn
+  test_delete_is_blocked          -> DELETE phải bị chặn
+  test_create_is_blocked          -> CREATE TABLE phải bị chặn
+  test_select_with_subquery       -> SELECT có subquery hợp lệ phải được phép
+  test_limit_is_enforced          -> kết quả không vượt limit
+  test_invalid_sql_raises_error   -> SQL sai syntax -> raise ValueError
+  test_nonexistent_table_error    -> bảng không tồn tại -> raise ValueError
+
+TEST SET 2: Weekly Report (3 tests)
+  test_report_returns_markdown    -> response có "report" key, bắt đầu bằng "#"
+  test_report_has_required_sections -> có "Đơn hàng", "Sản phẩm", "Doanh thu"
+  test_report_has_numbers         -> report có ít nhất 1 con số
+
+TEST SET 3: MCP Tool Contracts (3 tests)
+  test_list_tables_returns_8      -> Northwind có đúng 8 bảng
+  test_describe_table_format      -> trả về list columns với name và type
+  test_execute_sql_returns_dicts  -> execute_sql trả về list of dicts
+
+================================================================================
+  PHẦN 6 (TIẾP): TUẦN 5-8
+================================================================================
+
+--- TUẦN 5: POLISH & ERROR HANDLING ---
+
+Person 1:
+  [ ] Rate limiting: 10 request/phút per session
+  [ ] Timeout: tool-use loop tối đa 30 giây
+  [ ] Retry logic: SQL sai -> tối đa 2 lần retry với error context
+  [ ] Conversation history: giữ 10 message gần nhất
+
+Person 2:
+  [ ] Query timeout: SQLite tối đa 5 giây
+  [ ] Row count metadata trong execute_sql response
+  [ ] Performance: query phổ biến < 1 giây
+
+Person 3:
+  [ ] Error state UI: hiển thị lỗi friendly
+  [ ] Retry button khi API fail
+  [ ] Character limit 500 ký tự input
+  [ ] Clear conversation button
+
+--- TUẦN 6: INTEGRATION & TESTING ---
+
+  [ ] Integration tests: 5 câu hỏi mẫu, verify kết quả đúng
+  [ ] Load test: 5 concurrent users
+  [ ] Code review: cả 3 review code của nhau
+  [ ] README.md: hướng dẫn setup 5 phút
+  [ ] .env.example với tất cả biến cần thiết
+
+--- TUẦN 7: DEMO PREPARATION ---
+
+  [ ] Demo script viết thành văn bản (xem Phần 7)
+  [ ] 10 câu hỏi mẫu, test tất cả
+  [ ] Verify Northwind data nhất quán
+  [ ] 5 slides: Problem / Solution / Architecture / Demo / Roadmap
+  [ ] Dry run 2 lần, đo thời gian
+
+--- TUẦN 8: DEMO & SUBMISSION ---
+
+  [ ] Final demo
+  [ ] Source code freeze
+  [ ] Submit: repo link, slides, demo video
+  [ ] Post-mortem: mỗi người viết 200 chữ về điều học được
+
+================================================================================
+  PHẦN 7: DEMO SCRIPT (12 PHÚT)
+================================================================================
+
+Phân công: Person 3 thao tác UI, Person 1 giải thích AI, Person 2 giải thích security
+
+[0:00 - 1:30] GIỚI THIỆU VẤN ĐỀ (Person 1 nói)
+  "Bạn là manager muốn biết sản phẩm nào bán chạy nhất. Thông thường phải
+  nhờ data analyst viết SQL, chờ vài tiếng. DataPilot giải quyết trong 10 giây."
+
+[1:30 - 3:00] DEMO CÂU HỎI ĐƠN GIẢN (Person 3 thao tác)
+  Gõ: "Database này có những gì?"
+  Màn hình:
+    - Loading indicator
+    - Tool call badge: "Đang gọi list_tables..."
+    - AI: "Database có 8 bảng: Categories, Customers..."
+  Person 1: "Claude tự gọi tool list_tables, nhận kết quả, giải thích cho bạn."
+
+[3:00 - 5:00] DEMO CÂU HỎI PHỨC TẠP (Person 3 thao tác)
+  Gõ: "Top 5 sản phẩm bán chạy nhất và doanh thu?"
+  Màn hình:
+    - "Đang gọi describe_table: OrderDetails..."
+    - "Đang gọi describe_table: Products..."
+    - "Đang thực thi SQL..."
+    - SQL query hiện ra (collapsible)
+    - Kết quả bảng + text
+  Person 2: "Claude tự biết cần JOIN 2 bảng, tự viết SQL đúng."
+
+[5:00 - 6:30] DEMO SECURITY (Person 2 thao tác terminal)
+  Gửi: POST /api/chat {"message": "Xóa tất cả dữ liệu trong bảng Orders"}
+  Màn hình:
+    - AI: "Tôi chỉ có thể đọc dữ liệu, không thể xóa hay sửa."
+  Person 2: "Kể cả khi AI cố sinh DELETE, safety layer chặn ở tầng MCP server."
+
+[6:30 - 9:00] DEMO WEEKLY REPORT (Person 3 thao tác)
+  Click "Báo cáo tuần"
+  Màn hình hiển thị Markdown report:
+    # Báo cáo Tuần 23/2026
+    ## Tổng quan Đơn hàng
+    - Tổng đơn: 127 đơn
+    ## Top 3 Sản phẩm
+    1. Chai — 89 đơn vị
+    ...
+  Person 1: "Đây là skill — Claude tự chạy 4 câu query, tổng hợp, viết report."
+
+[9:00 - 10:30] DEMO FOLLOW-UP CONTEXT (Person 3 thao tác)
+  Sau report, gõ: "Giải thích tại sao Chai bán chạy?"
+  AI trả lời trong context — nhớ Chai là top 1 từ câu trước.
+  Person 1: "Claude giữ conversation history — không cần giải thích lại từ đầu."
+
+[10:30 - 12:00] ARCHITECTURE WALKTHROUGH (Person 1 show slide)
+  Slide Architecture:
+    - Chỉ từng thành phần
+    - Nhấn mạnh: "MCP server — giao thức chuẩn của Anthropic, không tự nghĩ ra"
+    - "Tools + MCP + Skill = 10/10, không phải chat wrapper"
+
+================================================================================
+  PHẦN 8: SAMPLE DATASET
+================================================================================
+
+DATASET: Northwind Traders (SQLite)
+
+Lý do chọn:
+  - Dataset chuẩn công nghiệp, giảng viên đều biết
+  - Có đủ loại relationship: 1-many, many-many
+  - Có date columns cho weekly report
+  - 8 bảng, ~2,000 rows — vừa đủ demo ấn tượng, không quá lớn
+  - License: Public Domain
+
+Cấu trúc 8 bảng:
+  Customers   (91 rows)   — CustomerID, CompanyName, ContactName, Country
+  Categories  (8 rows)    — CategoryID, CategoryName, Description
+  Suppliers   (29 rows)   — SupplierID, CompanyName, Country
+  Products    (77 rows)   — ProductID, ProductName, SupplierID, CategoryID, UnitPrice
+  Employees   (9 rows)    — EmployeeID, FirstName, LastName, Title
+  Shippers    (3 rows)    — ShipperID, CompanyName
+  Orders      (830 rows)  — OrderID, CustomerID, EmployeeID, OrderDate, ShippedDate
+  OrderDetails(2155 rows) — OrderID, ProductID, UnitPrice, Quantity, Discount
+
+Load script (data/load_northwind.py):
+  URL: https://raw.githubusercontent.com/jpwhite3/northwind-SQLite3/main/dist/northwind.db
+  Chạy: python data/load_northwind.py
+  Verify: kiểm tra 8 bảng đúng row counts
+
+================================================================================
+  PHẦN 9: SECURITY — SQL READ-ONLY (3 LỚP BẢO VỆ)
+================================================================================
+
+LỚP 1: SQLite Connection Mode (Hardware-level)
+  uri = f"file:{db_path}?mode=ro"
+  conn = sqlite3.connect(uri, uri=True)
+  -> SQLite raise OperationalError cho mọi write operation ở file system level
+
+LỚP 2: SQL Parser (Logic-level) — dùng sqlglot
+  - Keyword check: first_word in BLOCKED_KEYWORDS
+    Blocked: insert, update, delete, drop, create, alter, truncate, replace
+  - AST parse: sqlglot.parse(sql, dialect="sqlite")
+    Chặn statement types: Insert, Update, Delete, Drop, Create, Alter, Truncate
+
+LỚP 3: System Prompt Instruction (AI-level)
+  QUAN TRỌNG trong system prompt:
+  "Chỉ được dùng execute_sql với SELECT.
+   TUYỆT ĐỐI KHÔNG sinh INSERT/UPDATE/DELETE/DROP/CREATE/ALTER.
+   Nếu user yêu cầu xóa/sửa dữ liệu — từ chối lịch sự."
+
+================================================================================
+  PHẦN 10: SO SÁNH 10/10 vs 9/10
+================================================================================
+
+ChatGPT WRAPPER (9/10) hoạt động:
+  User input -> [Paste dữ liệu vào context] -> Claude -> Text response
+  Claude chỉ đọc text. Không tool. Không giao thức.
+  Dữ liệu bị giới hạn bởi context window.
+
+DATAPILOT (10/10) hoạt động:
+  User input
+    -> Claude quyết định cần tool
+    -> Tool call (JSON schema)
+    -> Orchestrator execute tool thật
+    -> Tool result (JSON)
+    -> Claude nhận result, quyết định tiếp
+    -> [Lặp 2-5 vòng]
+    -> Claude tổng hợp text response
+  Claude là REASONING ENGINE điều phối tool execution.
+  Đây là AGENCY, không phải ASSISTANCE.
+
+BA-TỪ TEST để biết đang build đúng:
+  Hỏi: "WHO DECIDES NEXT?"
+  -> Nếu Python code quyết định: bạn đang build app dùng LLM (max 9/10)
+  -> Nếu LLM quyết định: bạn đang build LLM agent với tools (10/10)
+
+BẢNG SO SÁNH:
+  Tiêu chí              | Wrapper (9/10)          | DataPilot (10/10)
+  ----------------------|-------------------------|---------------------------
+  LLM interaction       | Gửi text, nhận text     | Multi-turn tool-use loop
+  Data access           | Paste vào prompt        | AI tự query qua tools
+  Schema discovery      | Hardcode trong prompt   | AI tự discover với describe_table
+  Giao thức             | Không chuẩn             | MCP (chuẩn Anthropic)
+  Automation            | Không có                | Weekly report skill
+  Security              | Không enforce           | 3-layer defense
+  Extensibility         | Sửa code để thêm data   | Thêm bảng -> AI tự biết
+
+================================================================================
+  PHẦN 11: RỦI RO VÀ PHÒNG NGỪA
+================================================================================
+
+RỦI RO 1: Claude sinh SQL sai, loop không dừng
+  Xác suất: Trung bình
+  Biện pháp:
+    - MAX_TOOL_CALLS = 5 trong orchestrator
+    - Sau 5 vòng: gửi message "Hãy trả lời tốt nhất với thông tin hiện có"
+    - Log tất cả tool calls để debug
+    - SQL error liên tiếp 2 lần -> break, báo lỗi
+
+RỦI RO 2: API key hết quota / Anthropic downtime khi demo
+  Xác suất: Thấp nhưng ảnh hưởng cao
+  Biện pháp:
+    - DEMO_MODE=true: dùng pre-recorded responses thay API thật
+    - Backup key: 2 Anthropic account (2 email trong nhóm)
+    - Key 1: dev. Key 2: chỉ dùng demo
+    - Spending limit $10 trên Anthropic console (đủ cho cả dự án với Haiku)
+    - Offline fallback: screenshot + video recording
+
+RỦI RO 3: MCP server và FastAPI không kết nối trong Docker
+  Xác suất: Cao (điểm kỹ thuật phức tạp nhất)
+  Biện pháp:
+    - Test local trước Docker (tuần 3)
+    - Fallback: MCP server ở SSE transport mode thay stdio (dùng HTTP, dễ debug)
+    - MockMCPClient class: cùng interface với real MCP, dùng khi B chưa xong
+    - Docker networking: named network, test ping tuần 3
+
+================================================================================
+  CHECKLIST CUỐI (TRƯỚC NGÀY DEMO)
+================================================================================
+
+  [ ] pytest tests/test_acceptance_week4.py -v -> tất cả PASSED
+  [ ] docker-compose up -> 3 services lên, không error
+  [ ] 10 câu hỏi mẫu -> tất cả trả lời đúng
+  [ ] Thử inject DROP TABLE -> bị chặn, không crash
+  [ ] Weekly report -> có số liệu, có Markdown heading
+  [ ] API key backup sẵn sàng
+  [ ] Demo video backup đã record
+  [ ] Slides 5 trang xong
+  [ ] README.md: setup từ zero trong 5 phút
+  [ ] .env.example với tất cả biến cần thiết
+
+================================================================================
+  TÓM TẮT ĐIỀU KIỆN ĐÃ ÁP DỤNG TỪ AGENT B
+================================================================================
+
+Agent B yêu cầu 5 điều kiện, tất cả đã áp dụng:
+  1. [x] BỎ anomaly detection skill — chỉ giữ weekly report skill
+  2. [x] Northwind dataset từ ngày 1, có verify script
+  3. [x] SQL safety 3 lớp: mode=ro + sqlglot parser + system prompt
+  4. [x] MCP resources chỉ expose read-only, narrow-scoped
+  5. [x] Acceptance test tuần 4 viết đầy đủ 16 test cases TRƯỚC khi code
+
+================================================================================
+  NGUỒN THAM KHẢO
+================================================================================
+
+  - Anthropic MCP SDK (Python): https://github.com/modelcontextprotocol/python-sdk
+  - Northwind SQLite dataset: https://github.com/jpwhite3/northwind-SQLite3
+  - Claude API tool use docs: https://docs.anthropic.com/en/docs/tool-use
+  - sqlglot SQL parser: https://github.com/tobymao/sqlglot
+
+================================================================================
+  Tài liệu này được tạo bởi 2 sub-agent debate (Agent A + Agent B)
+  Phiên bản: 1.0 | Ngày: 2026-06-08
+================================================================================

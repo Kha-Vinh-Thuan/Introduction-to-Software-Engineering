@@ -1,0 +1,4 @@
+- old school, ko smart => max 7
+- smart, ko LLM => max 8.5
+- smart, llm wrapper => max 9
+- smart, llm as main program, provide tools, api, mcp and skills => max 10
