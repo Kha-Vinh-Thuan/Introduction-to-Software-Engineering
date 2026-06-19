@@ -1,72 +1,121 @@
-import google.generativeai as genai
+import httpx
+import json
 from app.core.config import settings
-from app.agent.tools import TOOL_DEFINITIONS, executeToolCall
 
-SYSTEM_PROMPT = """You are DataPilot, an intelligent database management assistant.
+SYSTEM_PROMPT = """Bạn là DataPilot, trợ lý phân tích dữ liệu HR. Chỉ trả lời dựa trên dữ liệu từ DB.
 
-You have access to tools to interact with a SQLite database. When a user asks a question
-or makes a request, decide which tools to call to fulfill the request.
+SCHEMA (SQLite):
+Employees(EmployeeID,HoTen,GioiTinh[Nam/Nữ],NgaySinh,DiaChi,ThanhPho,SoDienThoai,NgayVaoLam)
+EmployeeProfiles(ProfileID,EmployeeID,DepartmentID,CCCD,TinhTrangHonNhan[SINGLE/MARRIED/DIVORCED],LoaiHopDong[FULL_TIME/CONTRACT/PROBATION],TrangThaiLamViec[ACTIVE/RESIGNED/PENDING_TERMINATION],NgayVao,NgayNghi,ChucVu,CapBac,QuanLyTrucTiepID,EmailCongTy,SoDienThoaiCongTy,NguoiLienHeKhanCap,SoTaiKhoanNganHang,TenNganHang,MaSoThue,SoNgayPhepNam,SoNgayPhepBenh)
+Departments(DepartmentID,DepartmentName,ParentDepartmentID,CostCenter,HeadCount)
+Attendance(AttendanceID,EmployeeID,NgayLamViec,GioVao,GioRa,HinhThucLam[OFFICE/REMOTE/BUSINESS_TRIP],TrangThai[PRESENT/ABSENT/ON_LEAVE/HOLIDAY/WEEKEND],DiTre[0/1],SoPhutDiTre,SoPhutTangCa)
+BaseSalary(BaseSalaryID,EmployeeID,NgayHieuLuc,LuongCoBan,PhuCapDiLai,PhuCapAnTrua,PhuCapSucKhoe)
+SalaryHistory(SalaryID,EmployeeID,BaseSalaryID,NamKy,ThangKy,SoNgayLamViec,LuongCoBan,PhuCapDiLai,PhuCapAnTrua,PhuCapSucKhoe,ThuongHieuQua,PhuCapTangCa,KhauTruDiTre,KhauTruThue,KhauTruBHXH,LuongThucNhan,NgayThanhToan)
+LeaveRequests(LeaveID,EmployeeID,LoaiNghi[ANNUAL/SICK/PERSONAL/MATERNITY/PATERNITY/UNPAID],NgayBatDau,NgayKetThuc,SoNgay,LyDo,TrangThai[PENDING/APPROVED/REJECTED/CANCELLED],DuyetBoi,NgayDuyet,TaoLuc)
 
-RULES:
-- Always call list_tables first if you don't know the database structure
-- Always call describe_table before writing SQL queries
-- Only use SELECT statements in execute_sql — never INSERT, UPDATE, DELETE, DROP
-- Respond in the same language the user uses
-- For CRUD operations via chat, use the dedicated crud tools (createRecord, updateRecord, deleteRecord)
-- Be concise and clear in your responses
-"""
+QUAN HỆ: Employees.EmployeeID=EmployeeProfiles.EmployeeID=Attendance.EmployeeID=BaseSalary.EmployeeID=SalaryHistory.EmployeeID=LeaveRequests.EmployeeID; EmployeeProfiles.DepartmentID=Departments.DepartmentID; SalaryHistory.BaseSalaryID=BaseSalary.BaseSalaryID
+
+QUY TẮC: Gọi executeSql trực tiếp (đã biết schema). Chỉ SELECT. Trả lời tiếng Việt, ngắn gọn, có số liệu."""
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "executeSql",
+            "description": "Thực thi SELECT SQL trên SQLite HR database.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "description": "Câu lệnh SELECT hợp lệ"},
+                    "limit": {"type": "integer", "description": "Số hàng tối đa, mặc định 100"},
+                },
+                "required": ["sql"],
+            },
+        },
+    }
+]
+
+MAX_HISTORY = 6
+
+
+def _executeSql(sql: str, limit: int = 100) -> dict:
+    import sqlglot
+    from app.core.database import getReadOnlyConnection
+
+    BLOCKED = {"Insert", "Update", "Delete", "Drop", "Create", "Alter", "Truncate"}
+    try:
+        for stmt in sqlglot.parse(sql, dialect="sqlite"):
+            if type(stmt).__name__ in BLOCKED:
+                return {"error": f"Chỉ SELECT được phép."}
+    except Exception as e:
+        return {"error": f"SQL không hợp lệ: {e}"}
+
+    conn = getReadOnlyConnection()
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    rows = cursor.fetchmany(min(limit, 200))
+    columns = [d[0] for d in cursor.description] if cursor.description else []
+    conn.close()
+    return {"columns": columns, "rows": [list(r) for r in rows], "count": len(rows)}
 
 
 class AgentOrchestrator:
     def __init__(self):
-        genai.configure(api_key=settings.gemini_api_key)
-        self.model = genai.GenerativeModel(
-            model_name=settings.gemini_model,
-            tools=TOOL_DEFINITIONS,
-            system_instruction=SYSTEM_PROMPT,
-        )
+        self.headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "DataPilot",
+        }
 
     async def run(self, userMessage: str, conversationHistory: list[dict]) -> dict:
-        chat = self.model.start_chat(history=conversationHistory)
-        response = chat.send_message(userMessage)
+        # Giới hạn history để tiết kiệm token
+        recentHistory = conversationHistory[-(MAX_HISTORY):]
+
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for msg in recentHistory:
+            role = msg.get("role", "user")
+            content = msg.get("content", "") or (
+                msg.get("parts", [{}])[0].get("text", "") if msg.get("parts") else ""
+            )
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": userMessage})
 
         toolCallsLog = []
-        maxIterations = 5
-        iteration = 0
+        message = {}
 
-        while response.candidates[0].content.parts and iteration < maxIterations:
-            hasFunctionCall = any(
-                hasattr(part, "function_call")
-                for part in response.candidates[0].content.parts
-            )
-            if not hasFunctionCall:
-                break
+        async with httpx.AsyncClient(timeout=60) as client:
+            for _ in range(3):
+                payload = {
+                    "model": settings.openrouter_model,
+                    "messages": messages,
+                    "tools": TOOLS,
+                    "tool_choice": "auto",
+                }
+                resp = await client.post(OPENROUTER_URL, headers=self.headers, json=payload)
+                if resp.status_code >= 400:
+                    raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
 
-            functionResponses = []
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, "function_call"):
-                    toolName = part.function_call.name
-                    toolArgs = dict(part.function_call.args)
-                    toolResult = executeToolCall(toolName, toolArgs)
-                    toolCallsLog.append({"tool": toolName, "args": toolArgs, "result": toolResult})
-                    functionResponses.append(
-                        genai.protos.Part(
-                            function_response=genai.protos.FunctionResponse(
-                                name=toolName,
-                                response={"result": toolResult},
-                            )
-                        )
-                    )
+                data = resp.json()
+                choice = data["choices"][0]
+                message = choice["message"]
+                messages.append(message)
 
-            response = chat.send_message(functionResponses)
-            iteration += 1
+                tool_calls = message.get("tool_calls") or []
+                if not tool_calls or choice.get("finish_reason") == "stop":
+                    break
 
-        finalText = ""
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "text"):
-                finalText += part.text
+                for tc in tool_calls:
+                    fn_args = json.loads(tc["function"]["arguments"])
+                    result = _executeSql(**fn_args)
+                    toolCallsLog.append({"tool": "executeSql", "args": fn_args, "result": result})
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps(result, ensure_ascii=False),
+                    })
 
-        return {
-            "reply": finalText,
-            "toolCalls": toolCallsLog,
-        }
+        return {"reply": message.get("content") or "", "toolCalls": toolCallsLog}

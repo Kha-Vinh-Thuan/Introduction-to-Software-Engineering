@@ -14,8 +14,11 @@ class Settings(BaseSettings):
 
     database_path: str = "./data/datapilot.db"
 
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    anthropic_api_key: str = ""
+    claude_model: str = "claude-haiku-4-5-20251001"
+
+    openrouter_api_key: str = ""
+    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
 
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
