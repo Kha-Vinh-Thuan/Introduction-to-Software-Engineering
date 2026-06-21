@@ -20,6 +20,8 @@ env/
 
 # Database (keep .gitignore but exclude actual db files)
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite
 !data/.gitkeep
 

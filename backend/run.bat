@@ -3,9 +3,9 @@
 IF NOT EXIST venv (
     echo Creating virtual environment...
     python -m venv venv
-    echo Installing dependencies...
-    venv\Scripts\pip install -r requirements.txt
 )
+echo Installing/updating dependencies...
+venv\Scripts\pip install -r requirements.txt --quiet
 
 IF NOT EXIST .env (
     copy .env.example .env
@@ -15,4 +15,4 @@ IF NOT EXIST .env (
 IF NOT EXIST data mkdir data
 
 echo Starting backend at http://localhost:8000 ...
-venv\Scripts\uvicorn main:app --reload --host 0.0.0.0 --port 8000
+venv\Scripts\uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
