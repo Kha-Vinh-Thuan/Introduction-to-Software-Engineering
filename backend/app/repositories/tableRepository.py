@@ -27,13 +27,48 @@ class TableRepository:
         conn = getConnection()
         cursor = conn.cursor()
         offset = (page - 1) * pageSize
+
         cursor.execute(f"SELECT COUNT(*) as total FROM [{tableName}]")
         total = cursor.fetchone()["total"]
-        cursor.execute(f"SELECT * FROM [{tableName}] LIMIT ? OFFSET ?", (pageSize, offset))
+
+        cursor.execute(f"SELECT * FROM [{tableName}] LIMIT ? OFFSET ?",(pageSize, offset))
+
         records = [dict(row) for row in cursor.fetchall()]
         conn.close()
+
+        if search:
+            search = search.strip().lower()
+            records = [
+                record
+                for record in records
+                if any(search in str(value).lower() for value in record.values())
+            ]
+
+        return {"data": records, "total": total, "page": page, "pageSize": pageSize}
+    
+    def getSortedRecords(self, tableName: str, sortColumn: str, sortOrder: str = "ASC", page: int = 1, pageSize: int = 50) -> dict:
+        conn = getConnection()
+        cursor = conn.cursor()
+        offset = (page - 1) * pageSize
+
+        cursor.execute(f"SELECT COUNT(*) as total FROM [{tableName}]")
+        total = cursor.fetchone()["total"]
+
+        cursor.execute(f"SELECT * FROM [{tableName}] ORDER BY [{sortColumn}] {sortOrder} LIMIT ? OFFSET ?",(pageSize, offset))
+
+        records = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
         return {"data": records, "total": total, "page": page, "pageSize": pageSize}
 
+    def getRecordById(self, tableName: str, recordId: int) -> dict:
+        conn = getConnection()
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM [{tableName}] WHERE rowid = ?", (recordId,))
+        record = cursor.fetchone()
+        conn.close()
+        return dict(record) if record else None
+    
     def insertRecord(self, tableName: str, data: dict) -> dict:
         conn = getConnection()
         cursor = conn.cursor()

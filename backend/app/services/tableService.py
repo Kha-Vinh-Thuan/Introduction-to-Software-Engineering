@@ -13,6 +13,12 @@ class TableService:
 
     def getRecords(self, tableName: str, page: int = 1, pageSize: int = 50, search: str = ""):
         return self.tableRepository.findRecords(tableName, page, pageSize, search)
+    
+    def getSortedRecords(self, tableName: str, sortColumn: str, sortOrder: str = "ASC", page: int = 1, pageSize: int = 50):
+        return self.tableRepository.getSortedRecords(tableName, sortColumn, sortOrder, page, pageSize)
+    
+    def getRecordById(self, tableName: str, recordId: int):
+        return self.tableRepository.getRecordById(tableName, recordId)
 
     def createRecord(self, tableName: str, data: dict):
         return self.tableRepository.insertRecord(tableName, data)
