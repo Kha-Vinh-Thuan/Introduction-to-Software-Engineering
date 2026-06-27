@@ -6,7 +6,7 @@ from app.core.config import settings
 def verifyDb():
     conn = sqlite3.connect(settings.database_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     tables = [row[0] for row in cursor.fetchall()]
     conn.close()
     print(f"Database ready — {len(tables)} tables: {', '.join(tables)}")
