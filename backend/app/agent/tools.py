@@ -31,8 +31,16 @@ def listTables() -> list[str]:
     return [table["name"] for table in tables]
 
 
-def describeTable(tableName: str) -> list[dict]:
-    """Trả về định nghĩa cột (schema) của một bảng."""
+def describeTable(tableName: str) -> list[dict] | dict:
+    """Trả về định nghĩa cột (schema) của một bảng.
+
+    Mỗi cột gồm: cid, name, type, notnull, dflt_value, pk (từ PRAGMA table_info).
+    Tên bảng được kiểm tra dựa trên danh sách bảng thật trước khi truy vấn:
+    bảng không tồn tại (hoặc tên không hợp lệ) trả về {"error": ...} thay vì
+    list rỗng im lặng — đồng thời chặn tên gây lỗi cú pháp PRAGMA.
+    """
+    if tableName not in listTables():
+        return {"error": f"Bảng không tồn tại: {tableName!r}"}
     return tableRepository.findTableSchema(tableName)
 
 
