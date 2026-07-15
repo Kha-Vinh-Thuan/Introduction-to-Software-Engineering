@@ -5,10 +5,9 @@ class TableRepository:
     def findAllTables(self) -> list[dict]:
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        )
+
+        cursor.execute("SELECT name FROM pg_tables WHERE schemaname='public' ORDER BY name")
+
         tables = []
         for row in cursor.fetchall():
             tableName = row["name"]
