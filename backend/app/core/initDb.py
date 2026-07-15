@@ -1,9 +1,12 @@
-from app.core.database import getConnection
+import sqlite3
+import os
+from app.core.config import settings
 
-def verifyDb(conn) -> bool:
+
+def verifyDb():
+    conn = sqlite3.connect(settings.database_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     tables = [row[0] for row in cursor.fetchall()]
     conn.close()
     print(f"Database ready — {len(tables)} tables: {', '.join(tables)}")
@@ -11,12 +14,9 @@ def verifyDb(conn) -> bool:
 
 
 def initDb():
-    try:
-        conn = getConnection()
-        if not verifyDb(conn):
-            conn.close()
-            raise Exception("Database initialization failed: No tables found")
-        conn.close()
-    except Exception as e:
-        print(e)
-        raise
+    os.makedirs(os.path.dirname(settings.database_path), exist_ok=True)
+    if not os.path.exists(settings.database_path):
+        print(f"Database not found at {settings.database_path}.")
+        print("Run: python data/seed.py to create sample data.")
+    else:
+        verifyDb()

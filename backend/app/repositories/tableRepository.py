@@ -5,13 +5,14 @@ class TableRepository:
     def findAllTables(self) -> list[dict]:
         conn = getConnection()
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM pg_tables WHERE schemaname='public' ORDER BY name")
-
+        cursor.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
         tables = []
         for row in cursor.fetchall():
             tableName = row["name"]
-            cursor.execute(f"SELECT COUNT(*) as count FROM \"{tableName}\"")
+            cursor.execute(f"SELECT COUNT(*) as count FROM [{tableName}]")
             rowCount = cursor.fetchone()["count"]
             tables.append({"name": tableName, "rowCount": rowCount})
         conn.close()
@@ -20,17 +21,7 @@ class TableRepository:
     def findTableSchema(self, tableName: str) -> list[dict]:
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT
-                column_name,
-                data_type,
-                is_nullable,
-                column_default
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-            AND table_name = %s
-            ORDER BY ordinal_position
-        """, (tableName,))
+        cursor.execute(f"PRAGMA table_info([{tableName}])")
         columns = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return columns
@@ -40,10 +31,10 @@ class TableRepository:
         cursor = conn.cursor()
         offset = (page - 1) * pageSize
 
-        cursor.execute(f"SELECT COUNT(*) as total FROM \"{tableName}\"")
+        cursor.execute(f"SELECT COUNT(*) as total FROM [{tableName}]")
         total = cursor.fetchone()["total"]
 
-        cursor.execute(f"SELECT * FROM \"{tableName}\" LIMIT %s OFFSET %s",(pageSize, offset))
+        cursor.execute(f"SELECT * FROM [{tableName}] LIMIT ? OFFSET ?",(pageSize, offset))
 
         records = [dict(row) for row in cursor.fetchall()]
         conn.close()
@@ -63,10 +54,10 @@ class TableRepository:
         cursor = conn.cursor()
         offset = (page - 1) * pageSize
 
-        cursor.execute(f"SELECT COUNT(*) as total FROM \"{tableName}\"")
+        cursor.execute(f"SELECT COUNT(*) as total FROM [{tableName}]")
         total = cursor.fetchone()["total"]
 
-        cursor.execute(f"SELECT * FROM \"{tableName}\" ORDER BY \"{sortColumn}\" {sortOrder} LIMIT %s OFFSET %s",(pageSize, offset))
+        cursor.execute(f"SELECT * FROM [{tableName}] ORDER BY [{sortColumn}] {sortOrder} LIMIT ? OFFSET ?",(pageSize, offset))
 
         records = [dict(row) for row in cursor.fetchall()]
         conn.close()
@@ -76,7 +67,7 @@ class TableRepository:
     def getRecordById(self, tableName: str, recordId: int) -> dict:
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM \"{tableName}\" WHERE rowid = %s", (recordId,))
+        cursor.execute(f"SELECT * FROM [{tableName}] WHERE rowid = ?", (recordId,))
         record = cursor.fetchone()
         conn.close()
         return dict(record) if record else None
@@ -87,7 +78,7 @@ class TableRepository:
         columns = ", ".join([f"[{k}]" for k in data.keys()])
         placeholders = ", ".join(["?" for _ in data])
         cursor.execute(
-            f"INSERT INTO \"{tableName}\" ({columns}) VALUES ({placeholders})",
+            f"INSERT INTO [{tableName}] ({columns}) VALUES ({placeholders})",
             list(data.values())
         )
         conn.commit()
@@ -100,7 +91,7 @@ class TableRepository:
         cursor = conn.cursor()
         setClause = ", ".join([f"[{k}] = ?" for k in data.keys()])
         cursor.execute(
-            f"UPDATE \"{tableName}\" SET {setClause} WHERE rowid = %s",
+            f"UPDATE [{tableName}] SET {setClause} WHERE rowid = ?",
             list(data.values()) + [recordId]
         )
         conn.commit()
@@ -110,7 +101,7 @@ class TableRepository:
     def deleteRecord(self, tableName: str, recordId: int) -> bool:
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute(f"DELETE FROM \"{tableName}\" WHERE rowid = %s", (recordId,))
+        cursor.execute(f"DELETE FROM [{tableName}] WHERE rowid = ?", (recordId,))
         conn.commit()
         conn.close()
         return cursor.rowcount > 0

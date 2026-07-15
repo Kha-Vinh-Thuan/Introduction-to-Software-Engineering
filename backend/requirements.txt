@@ -2,9 +2,9 @@ fastapi
 uvicorn[standard]
 anthropic
 mcp
+sqlglot
 pydantic
 pydantic-settings
 python-dotenv
 python-multipart
 httpx
-psycopg[binary]

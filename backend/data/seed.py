@@ -11,29 +11,20 @@ Bảng:
   Attendance       — chấm công 9–18h, T2–T6, Jan–Jun 2025
   LeaveRequests    — đơn nghỉ phép (theo Luật Lao Động VN)
   ChatHistory      — lịch sử hội thoại với AI
-  Categories       — danh mục sản phẩm
-  Suppliers        — nhà cung cấp
-  Products         — sản phẩm
-  Customers        — khách hàng
-  Shippers         — đơn vị vận chuyển
-  Orders           — đơn hàng
-  OrderDetails     — chi tiết đơn hàng
-
 
 Chạy:
   python data/seed.py
-
-Kết nối tới server PostgreSQL cục bộ (localhost) port 5432 với user mặc định "postgres" và password "12345678".
 """
 
-
-
+import sqlite3
 import random
+import os
 import sys
 from datetime import date, timedelta, datetime
-import psycopg
+
 sys.stdout.reconfigure(encoding="utf-8")
 
+DB_PATH = os.path.join(os.path.dirname(__file__), "datapilot.db")
 
 def randomDate(start: date, end: date) -> date:
     """Trả về ngày ngẫu nhiên trong khoảng [start, end]."""
@@ -56,257 +47,147 @@ def weightedChoice(choices: list, weights: list):
 
 
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS "Departments" (
-    "DepartmentID"      BIGSERIAL PRIMARY KEY,
-    "DepartmentName"    TEXT    NOT NULL UNIQUE,
-    "ParentDepartmentID" INTEGER REFERENCES "Departments"("DepartmentID"),
-    "CostCenter"        TEXT    NOT NULL,
-    "HeadCount"         INTEGER NOT NULL DEFAULT 0
+CREATE TABLE IF NOT EXISTS Departments (
+    DepartmentID        INTEGER PRIMARY KEY AUTOINCREMENT,
+    DepartmentName      TEXT    NOT NULL UNIQUE,
+    ParentDepartmentID  INTEGER REFERENCES Departments(DepartmentID),
+    CostCenter          TEXT    NOT NULL,
+    HeadCount           INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS "Employees" (
-    "EmployeeID"        BIGSERIAL PRIMARY KEY,
-    "HoTen"             TEXT    NOT NULL,
-    "GioiTinh"          TEXT    NOT NULL CHECK("GioiTinh" IN ('Nam', 'Nữ')),
-    "NgaySinh"          DATE    NOT NULL,
-    "DiaChi"            TEXT    NOT NULL,
-    "ThanhPho"          TEXT    NOT NULL,
-    "SoDienThoai"       TEXT    NOT NULL,
-    "NgayVaoLam"        DATE    NOT NULL
+CREATE TABLE IF NOT EXISTS Employees (
+    EmployeeID          INTEGER PRIMARY KEY AUTOINCREMENT,
+    HoTen               TEXT    NOT NULL,
+    GioiTinh            TEXT    NOT NULL CHECK(GioiTinh IN ('Nam', 'Nữ')),
+    NgaySinh            DATE    NOT NULL,
+    DiaChi              TEXT    NOT NULL,
+    ThanhPho            TEXT    NOT NULL,
+    SoDienThoai         TEXT    NOT NULL,
+    NgayVaoLam          DATE    NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS "EmployeeProfiles" (
-    "ProfileID"         BIGSERIAL PRIMARY KEY,
-    "EmployeeID"        INTEGER NOT NULL UNIQUE REFERENCES "Employees"("EmployeeID"),
-    "DepartmentID"      INTEGER NOT NULL REFERENCES "Departments"("DepartmentID"),
-    "CCCD"              TEXT    NOT NULL UNIQUE,
-    "TinhTrangHonNhan"  TEXT    NOT NULL CHECK("TinhTrangHonNhan" IN ('SINGLE','MARRIED','DIVORCED')),
-    "LoaiHopDong"       TEXT    NOT NULL CHECK("LoaiHopDong" IN ('FULL_TIME','CONTRACT','PROBATION')),
-    "TrangThaiLamViec"  TEXT    NOT NULL CHECK("TrangThaiLamViec" IN ('ACTIVE','RESIGNED','PENDING_TERMINATION')),
-    "NgayVao"           DATE    NOT NULL,
-    "NgayNghi"          DATE,
-    "ChucVu"            TEXT    NOT NULL,
-    "CapBac"            TEXT    NOT NULL,
-    "QuanLyTrucTiepID"  INTEGER REFERENCES "Employees"("EmployeeID"),
-    "EmailCongTy"       TEXT    NOT NULL UNIQUE,
-    "SoDienThoaiCongTy" TEXT    NOT NULL,
-    "NguoiLienHeKhánCap" TEXT    NOT NULL,
-    "SoTaiKhoanNganHang" TEXT    NOT NULL,
-    "TenNganHang"       TEXT    NOT NULL,
-    "MaSoThue"          TEXT    NOT NULL UNIQUE,
-    "SoNgayPhepNam"     INTEGER NOT NULL DEFAULT 12,
-    "SoNgayPhepBenh"    INTEGER NOT NULL DEFAULT 12
+CREATE TABLE IF NOT EXISTS EmployeeProfiles (
+    ProfileID           INTEGER PRIMARY KEY AUTOINCREMENT,
+    EmployeeID          INTEGER NOT NULL UNIQUE REFERENCES Employees(EmployeeID),
+    DepartmentID        INTEGER NOT NULL REFERENCES Departments(DepartmentID),
+    CCCD                TEXT    NOT NULL UNIQUE,
+    TinhTrangHonNhan    TEXT    NOT NULL CHECK(TinhTrangHonNhan IN ('SINGLE','MARRIED','DIVORCED')),
+    LoaiHopDong         TEXT    NOT NULL CHECK(LoaiHopDong IN ('FULL_TIME','CONTRACT','PROBATION')),
+    TrangThaiLamViec    TEXT    NOT NULL CHECK(TrangThaiLamViec IN ('ACTIVE','RESIGNED','PENDING_TERMINATION')),
+    NgayVao             DATE    NOT NULL,
+    NgayNghi            DATE,
+    ChucVu              TEXT    NOT NULL,
+    CapBac              TEXT    NOT NULL,
+    QuanLyTrucTiepID    INTEGER REFERENCES Employees(EmployeeID),
+    EmailCongTy         TEXT    NOT NULL UNIQUE,
+    SoDienThoaiCongTy   TEXT    NOT NULL,
+    NguoiLienHeKhánCap  TEXT    NOT NULL,
+    SoTaiKhoanNganHang  TEXT    NOT NULL,
+    TenNganHang         TEXT    NOT NULL,
+    MaSoThue            TEXT    NOT NULL UNIQUE,
+    SoNgayPhepNam       INTEGER NOT NULL DEFAULT 12,
+    SoNgayPhepBenh      INTEGER NOT NULL DEFAULT 12
 );
 
 -- Lịch sử lương cứng: mỗi lần tăng/điều chỉnh lương tạo 1 dòng mới
-CREATE TABLE IF NOT EXISTS "BaseSalary" (
-    "BaseSalaryID"      BIGSERIAL PRIMARY KEY,
-    "EmployeeID"        INTEGER NOT NULL REFERENCES "Employees"("EmployeeID"),
-    "NgayHieuLuc"       DATE    NOT NULL,
-    "LuongCoBan"        NUMERIC NOT NULL,
-    "PhuCapDiLai"       NUMERIC NOT NULL DEFAULT 0,
-    "PhuCapAnTrua"      NUMERIC NOT NULL DEFAULT 0,
-    "PhuCapSucKhoe"     NUMERIC NOT NULL DEFAULT 0,
-    "GhiChu"            TEXT,
-    UNIQUE("EmployeeID", "NgayHieuLuc")
+CREATE TABLE IF NOT EXISTS BaseSalary (
+    BaseSalaryID        INTEGER PRIMARY KEY AUTOINCREMENT,
+    EmployeeID          INTEGER NOT NULL REFERENCES Employees(EmployeeID),
+    NgayHieuLuc         DATE    NOT NULL,
+    LuongCoBan          NUMERIC NOT NULL,
+    PhuCapDiLai         NUMERIC NOT NULL DEFAULT 0,
+    PhuCapAnTrua        NUMERIC NOT NULL DEFAULT 0,
+    PhuCapSucKhoe       NUMERIC NOT NULL DEFAULT 0,
+    GhiChu              TEXT,
+    UNIQUE(EmployeeID, NgayHieuLuc)
 );
-    
+
 -- Lương thực nhận hàng tháng — tính từ BaseSalary + Attendance
-CREATE TABLE IF NOT EXISTS "SalaryHistory" (
-    "SalaryID"          BIGSERIAL PRIMARY KEY,
-    "EmployeeID"        INTEGER NOT NULL REFERENCES "Employees"("EmployeeID"),
-    "BaseSalaryID"      INTEGER NOT NULL REFERENCES "BaseSalary"("BaseSalaryID"),
-    "NamKy"             INTEGER NOT NULL,
-    "ThangKy"           INTEGER NOT NULL CHECK("ThangKy" BETWEEN 1 AND 12),
-    "SoNgayLamViec"     INTEGER NOT NULL DEFAULT 0,
-    "SoPhutTreGioTong"  INTEGER NOT NULL DEFAULT 0,
-    "SoPhutTangCaTong"  INTEGER NOT NULL DEFAULT 0,
-    "LuongCoBan"        NUMERIC NOT NULL,
-    "PhuCapDiLai"       NUMERIC NOT NULL DEFAULT 0,
-    "PhuCapAnTrua"      NUMERIC NOT NULL DEFAULT 0,
-    "PhuCapSucKhoe"     NUMERIC NOT NULL DEFAULT 0,
-    "ThuongHieuQua"     NUMERIC NOT NULL DEFAULT 0,
-    "PhuCapTangCa"      NUMERIC NOT NULL DEFAULT 0,
-    "KhauTruDiTre"      NUMERIC NOT NULL DEFAULT 0,
-    "KhauTruThue"       NUMERIC NOT NULL DEFAULT 0,
-    "KhauTruBHXH"       NUMERIC NOT NULL DEFAULT 0,
-    "LuongThucNhan"     NUMERIC NOT NULL,
-    "NgayThanhToan"     DATE    NOT NULL,
-    UNIQUE("EmployeeID", "NamKy", "ThangKy")
+CREATE TABLE IF NOT EXISTS SalaryHistory (
+    SalaryID            INTEGER PRIMARY KEY AUTOINCREMENT,
+    EmployeeID          INTEGER NOT NULL REFERENCES Employees(EmployeeID),
+    BaseSalaryID        INTEGER NOT NULL REFERENCES BaseSalary(BaseSalaryID),
+    NamKy               INTEGER NOT NULL,
+    ThangKy             INTEGER NOT NULL CHECK(ThangKy BETWEEN 1 AND 12),
+    SoNgayLamViec       INTEGER NOT NULL DEFAULT 0,
+    SoPhutTreGioTong    INTEGER NOT NULL DEFAULT 0,
+    SoPhutTangCaTong    INTEGER NOT NULL DEFAULT 0,
+    LuongCoBan          NUMERIC NOT NULL,
+    PhuCapDiLai         NUMERIC NOT NULL DEFAULT 0,
+    PhuCapAnTrua        NUMERIC NOT NULL DEFAULT 0,
+    PhuCapSucKhoe       NUMERIC NOT NULL DEFAULT 0,
+    ThuongHieuQua       NUMERIC NOT NULL DEFAULT 0,
+    PhuCapTangCa        NUMERIC NOT NULL DEFAULT 0,
+    KhauTruDiTre        NUMERIC NOT NULL DEFAULT 0,
+    KhauTruThue         NUMERIC NOT NULL DEFAULT 0,
+    KhauTruBHXH         NUMERIC NOT NULL DEFAULT 0,
+    LuongThucNhan       NUMERIC NOT NULL,
+    NgayThanhToan       DATE    NOT NULL,
+    UNIQUE(EmployeeID, NamKy, ThangKy)
 );
 
-CREATE TABLE IF NOT EXISTS "Attendance" (
-    "AttendanceID"      BIGSERIAL PRIMARY KEY,
-    "EmployeeID"        INTEGER NOT NULL REFERENCES "Employees"("EmployeeID"),
-    "NgayLamViec"       DATE    NOT NULL,
-    "GioVao"            TEXT,
-    "GioRa"             TEXT,
-    "HinhThucLam"       TEXT    NOT NULL DEFAULT 'OFFICE'
-                                CHECK("HinhThucLam" IN ('OFFICE','REMOTE','BUSINESS_TRIP')),
-    "TrangThai"         TEXT    NOT NULL
-                                CHECK("TrangThai" IN ('PRESENT','ABSENT','ON_LEAVE','HOLIDAY','WEEKEND')),
-    "DiTre"             INTEGER NOT NULL DEFAULT 0 CHECK("DiTre" IN (0,1)),
-    "SoPhutDiTre"       INTEGER NOT NULL DEFAULT 0,
-    "SoPhutTangCa"      INTEGER NOT NULL DEFAULT 0,
-    "GhiChu"            TEXT,
-    UNIQUE("EmployeeID", "NgayLamViec")
+CREATE TABLE IF NOT EXISTS Attendance (
+    AttendanceID        INTEGER PRIMARY KEY AUTOINCREMENT,
+    EmployeeID          INTEGER NOT NULL REFERENCES Employees(EmployeeID),
+    NgayLamViec         DATE    NOT NULL,
+    GioVao              TEXT,
+    GioRa               TEXT,
+    HinhThucLam         TEXT    NOT NULL DEFAULT 'OFFICE'
+                                CHECK(HinhThucLam IN ('OFFICE','REMOTE','BUSINESS_TRIP')),
+    TrangThai           TEXT    NOT NULL
+                                CHECK(TrangThai IN ('PRESENT','ABSENT','ON_LEAVE','HOLIDAY','WEEKEND')),
+    DiTre               INTEGER NOT NULL DEFAULT 0 CHECK(DiTre IN (0,1)),
+    SoPhutDiTre         INTEGER NOT NULL DEFAULT 0,
+    SoPhutTangCa        INTEGER NOT NULL DEFAULT 0,
+    GhiChu              TEXT,
+    UNIQUE(EmployeeID, NgayLamViec)
 );
 
-CREATE TABLE IF NOT EXISTS "LeaveRequests" (
-    "LeaveID"           BIGSERIAL PRIMARY KEY,
-    "EmployeeID"        INTEGER NOT NULL REFERENCES "Employees"("EmployeeID"),
-    "LoaiNghi"          TEXT    NOT NULL
-                                CHECK("LoaiNghi" IN ('ANNUAL','SICK','PERSONAL','MATERNITY','PATERNITY','UNPAID')),
-    "NgayBatDau"        DATE    NOT NULL,
-    "NgayKetThuc"       DATE    NOT NULL,
-    "SoNgay"            INTEGER NOT NULL,
-    "LyDo"              TEXT    NOT NULL,
-    "TrangThai"         TEXT    NOT NULL DEFAULT 'PENDING'
-                                CHECK("TrangThai" IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
-    "DuyetBoi"          INTEGER REFERENCES "Employees"("EmployeeID"),
-    "NgayDuyet"         TIMESTAMP,
-    "TaoLuc"            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS LeaveRequests (
+    LeaveID             INTEGER PRIMARY KEY AUTOINCREMENT,
+    EmployeeID          INTEGER NOT NULL REFERENCES Employees(EmployeeID),
+    LoaiNghi            TEXT    NOT NULL
+                                CHECK(LoaiNghi IN ('ANNUAL','SICK','PERSONAL','MATERNITY','PATERNITY','UNPAID')),
+    NgayBatDau          DATE    NOT NULL,
+    NgayKetThuc         DATE    NOT NULL,
+    SoNgay              INTEGER NOT NULL,
+    LyDo                TEXT    NOT NULL,
+    TrangThai           TEXT    NOT NULL DEFAULT 'PENDING'
+                                CHECK(TrangThai IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
+    DuyetBoi            INTEGER REFERENCES Employees(EmployeeID),
+    NgayDuyet           DATETIME,
+    TaoLuc              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS "ChatHistory" (
-    "ChatID"            BIGSERIAL PRIMARY KEY,
-    "SessionID"         TEXT    NOT NULL,
-    "NoiDungNguoiDung"  TEXT    NOT NULL,
-    "PhanHoiAI"         TEXT    NOT NULL,
-    "NhatKyCongCu"      TEXT    NOT NULL DEFAULT '[]',
-    "TokenDauVao"       INTEGER NOT NULL DEFAULT 0,
-    "TokenDauRa"        INTEGER NOT NULL DEFAULT 0,
-    "ThoiGianXuLyMs"    INTEGER NOT NULL DEFAULT 0,
-    "TaoLuc"            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS ChatHistory (
+    ChatID              INTEGER PRIMARY KEY AUTOINCREMENT,
+    SessionID           TEXT    NOT NULL,
+    NoiDungNguoiDung    TEXT    NOT NULL,
+    PhanHoiAI           TEXT    NOT NULL,
+    NhatKyCongCu        TEXT    NOT NULL DEFAULT '[]',
+    TokenDauVao         INTEGER NOT NULL DEFAULT 0,
+    TokenDauRa          INTEGER NOT NULL DEFAULT 0,
+    ThoiGianXuLyMs      INTEGER NOT NULL DEFAULT 0,
+    TaoLuc              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE "Categories" (
-        "CategoryID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY, 
-        "TenDanhMuc" VARCHAR(25), 
-        "MoTa" VARCHAR(255) 
-);
-CREATE TABLE "Customers" (      
-    "CustomerID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "TenKhachHang" VARCHAR(50),
-    "TenNguoiLienHe" VARCHAR(50),
-    "DiaChi" VARCHAR(50),
-    "ThanhPho" VARCHAR(20),
-    "MaBuuChinh" VARCHAR(10),
-    "QuocGia" VARCHAR(15)
-);
-CREATE TABLE "Shippers"(
-    "ShipperID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "TenNguoiGiaoHang" VARCHAR(25),
-    "SoDienThoai" VARCHAR(15)
-);
-CREATE TABLE "Suppliers"(
-    "SupplierID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "TenNhaCungCap" VARCHAR(50),
-    "TenNguoiLienHe" VARCHAR(50),
-    "DiaChi" VARCHAR(50),
-    "ThanhPho" VARCHAR(20),
-    "MaBuuChinh" VARCHAR(10),
-    "QuocGia" VARCHAR(15),
-    "SoDienThoai" VARCHAR(15)
-);
-CREATE TABLE "Products"(
-    "ProductID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "TenSanPham" VARCHAR(50),
-    "SupplierID" INTEGER,
-    "CategoryID" INTEGER,
-    "DonVi" VARCHAR(25),
-    "Gia" NUMERIC,
-    FOREIGN KEY ("CategoryID") REFERENCES "Categories" ("CategoryID"),
-    FOREIGN KEY ("SupplierID") REFERENCES "Suppliers" ("SupplierID")
-);
-CREATE TABLE "Orders"(
-    "OrderID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "CustomerID" INTEGER,
-    "EmployeeID" INTEGER,
-    "NgayDatHang" TIMESTAMP,
-    "ShipperID" INTEGER,
-    FOREIGN KEY ("EmployeeID") REFERENCES "Employees" ("EmployeeID"),
-    FOREIGN KEY ("CustomerID") REFERENCES "Customers" ("CustomerID"),
-    FOREIGN KEY ("ShipperID") REFERENCES "Shippers" ("ShipperID")
-);
-CREATE TABLE "OrderDetails"(
-    "OrderDetailID" INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    "OrderID" INTEGER,
-    "ProductID" INTEGER,
-    "Quantity" INTEGER,
-    FOREIGN KEY ("OrderID") REFERENCES "Orders" ("OrderID"),
-    FOREIGN KEY ("ProductID") REFERENCES "Products" ("ProductID")
-);
-CREATE INDEX IF NOT EXISTS idx_base_sal_emp     ON "BaseSalary"("EmployeeID", "NgayHieuLuc");
-CREATE INDEX IF NOT EXISTS idx_att_emp_date     ON "Attendance"("EmployeeID", "NgayLamViec");
-CREATE INDEX IF NOT EXISTS idx_att_date         ON "Attendance"("NgayLamViec");
-CREATE INDEX IF NOT EXISTS idx_att_ditre        ON "Attendance"("DiTre");
-CREATE INDEX IF NOT EXISTS idx_sal_emp_period   ON "SalaryHistory"("EmployeeID", "NamKy", "ThangKy");
-CREATE INDEX IF NOT EXISTS idx_leave_emp        ON "LeaveRequests"("EmployeeID");
-CREATE INDEX IF NOT EXISTS idx_leave_status     ON "LeaveRequests"("TrangThai");
-CREATE INDEX IF NOT EXISTS idx_chat_session     ON "ChatHistory"("SessionID");
-CREATE INDEX IF NOT EXISTS idx_chat_created     ON "ChatHistory"("TaoLuc");
-CREATE INDEX IF NOT EXISTS idx_profile_dept     ON "EmployeeProfiles"("DepartmentID");
-CREATE INDEX IF NOT EXISTS idx_profile_status   ON "EmployeeProfiles"("TrangThaiLamViec");
 
-CREATE INDEX IF NOT EXISTS idx_categories_tendanhmuc
-            ON "Categories" ("TenDanhMuc");
-CREATE INDEX IF NOT EXISTS idx_customers_thanhkhang
-    ON "Customers" ("TenKhachHang");
-CREATE INDEX IF NOT EXISTS idx_customers_thanhpho
-    ON "Customers" ("ThanhPho");
-CREATE INDEX IF NOT EXISTS idx_shippers_ten
-    ON "Shippers" ("TenNguoiGiaoHang");
-CREATE INDEX IF NOT EXISTS idx_suppliers_ten
-    ON "Suppliers" ("TenNhaCungCap");
-CREATE INDEX IF NOT EXISTS idx_suppliers_thanhpho
-    ON "Suppliers" ("ThanhPho");
-CREATE INDEX IF NOT EXISTS idx_products_supplierid
-    ON "Products" ("SupplierID");
-CREATE INDEX IF NOT EXISTS idx_products_categoryid
-    ON "Products" ("CategoryID");
-CREATE INDEX IF NOT EXISTS idx_products_tensanpham
-    ON "Products" ("TenSanPham");
-CREATE INDEX IF NOT EXISTS idx_orders_customerid
-    ON "Orders" ("CustomerID");
-CREATE INDEX IF NOT EXISTS idx_orders_employeeid
-    ON "Orders" ("EmployeeID");
-CREATE INDEX IF NOT EXISTS idx_orders_shipperid
-    ON "Orders" ("ShipperID");
-CREATE INDEX IF NOT EXISTS idx_orders_ngaydathang
-    ON "Orders" ("NgayDatHang");
-CREATE INDEX IF NOT EXISTS idx_orderdetails_orderid
-    ON "OrderDetails" ("OrderID");
-CREATE INDEX IF NOT EXISTS idx_orderdetails_productid
-    ON "OrderDetails" ("ProductID");
+CREATE INDEX IF NOT EXISTS idx_base_sal_emp     ON BaseSalary(EmployeeID, NgayHieuLuc);
+CREATE INDEX IF NOT EXISTS idx_att_emp_date     ON Attendance(EmployeeID, NgayLamViec);
+CREATE INDEX IF NOT EXISTS idx_att_date         ON Attendance(NgayLamViec);
+CREATE INDEX IF NOT EXISTS idx_att_ditre        ON Attendance(DiTre);
+CREATE INDEX IF NOT EXISTS idx_sal_emp_period   ON SalaryHistory(EmployeeID, NamKy, ThangKy);
+CREATE INDEX IF NOT EXISTS idx_leave_emp        ON LeaveRequests(EmployeeID);
+CREATE INDEX IF NOT EXISTS idx_leave_status     ON LeaveRequests(TrangThai);
+CREATE INDEX IF NOT EXISTS idx_chat_session     ON ChatHistory(SessionID);
+CREATE INDEX IF NOT EXISTS idx_chat_created     ON ChatHistory(TaoLuc);
+CREATE INDEX IF NOT EXISTS idx_profile_dept     ON EmployeeProfiles(DepartmentID);
+CREATE INDEX IF NOT EXISTS idx_profile_status   ON EmployeeProfiles(TrangThaiLamViec);
 """
 
 # ---------------------------------------------------------------------------
 # Dữ liệu tham chiếu
 # ---------------------------------------------------------------------------
-CATEGORIES = [
-    ("Đồ Uống", "Nước ngọt, cà phê, trà, bia, rượu"),
-    ("Gia Vị & Nước Chấm", "Nước mắm, tương ớt, gia vị khô, nước sốt"),
-    ("Bánh Kẹo", "Bánh ngọt, kẹo, mứt, socola"),
-    ("Sản Phẩm Từ Sữa", "Sữa tươi, phô mai, sữa chua, bơ"),
-    ("Ngũ Cốc & Bánh Mì", "Bánh mì, ngũ cốc, mì gói, bún khô"),
-    ("Hải Sản", "Cá, tôm, cua, mực đông lạnh"),
-    ("Thịt Tươi Sống", "Thịt heo, thịt bò, thịt gà"),
-    ("Rau Củ Quả", "Rau xanh, củ quả, trái cây tươi"),
-]
-SUPPLIER_NAMES = [
-    "Công ty TNHH Thực Phẩm Miền Nam", "Công ty CP Nông Sản Việt",
-    "Công ty TNHH XNK Hải Sản Bình Minh", "Công ty CP Thực Phẩm An Gia",
-    "Công ty TNHH Chế Biến Nông Sản Tân Phú", "Công ty CP Sữa Việt Xanh",
-    "Công ty TNHH Bánh Kẹo Hồng Phát", "Công ty CP Gia Vị Á Đông",
-    "Công ty TNHH Thủy Sản Sông Hậu", "Công ty CP Thực Phẩm Sài Gòn Food",
-    "Công ty TNHH XNK Nông Sản Đồng Bằng", "Công ty CP Đồ Uống Việt Phát",
-    "Công ty TNHH Thực Phẩm Sạch Ba Miền", "Công ty CP Chế Biến Thịt Vissan Nhỏ",
-    "Công ty TNHH Nông Sản Đà Lạt Xanh",
-]
-SHIPPER_NAMES = [
-    "Giao Hàng Nhanh", "Giao Hàng Tiết Kiệm", "Viettel Post",
-    "VNPost", "J&T Express", "Ninja Van", "Ahamove", "ShopeeExpress",
-]
+
 DEPARTMENTS = [
     ("Ban Giám Đốc",              None,               "CC-000"),
     ("Kỹ Thuật",                  None,               "CC-100"),
@@ -491,112 +372,33 @@ CHAT_SAMPLES = [
         "Tỉ lệ APPROVED: **72%** | REJECTED: 11% | PENDING: còn lại"
     ),
 ]
-PRODUCT_NAMES_BY_CATEGORY = {
-    "Đồ Uống": [
-        "Cà Phê Sữa Đá Đóng Chai", "Trà Xanh Không Độ", "Nước Ngọt Có Gas",
-        "Bia Lon", "Nước Suối Tinh Khiết", "Trà Đào Cam Sả", "Nước Ép Trái Cây",
-        "Sữa Đậu Nành Đóng Hộp",
-    ],
-    "Gia Vị & Nước Chấm": [
-        "Nước Mắm Phú Quốc", "Tương Ớt Chin-su", "Nước Tương Đậu Nành",
-        "Muối Tôm Tây Ninh", "Bột Ngọt", "Hạt Nêm Từ Thịt", "Sa Tế Tôm",
-        "Dầu Hào",
-    ],
-    "Bánh Kẹo": [
-        "Bánh Pía Sóc Trăng", "Kẹo Dừa Bến Tre", "Bánh Trung Thu",
-        "Socola Sữa", "Mứt Gừng", "Bánh Quy Bơ", "Kẹo Lạc",
-    ],
-    "Sản Phẩm Từ Sữa": [
-        "Sữa Tươi Tiệt Trùng", "Phô Mai Con Bò Cười", "Sữa Chua Có Đường",
-        "Bơ Lạt", "Sữa Đặc Ông Thọ", "Kem Tươi Whipping",
-    ],
-    "Ngũ Cốc & Bánh Mì": [
-        "Bánh Mì Sandwich", "Mì Gói Hảo Hảo", "Bún Khô",
-        "Ngũ Cốc Ăn Sáng", "Miến Dong", "Phở Khô Gia Lai", "Bột Mì Đa Dụng",
-    ],
-    "Hải Sản": [
-        "Tôm Sú Đông Lạnh", "Cá Basa Fillet", "Mực Ống Tươi",
-        "Cua Biển Cà Mau", "Chả Cá Thác Lác", "Cá Hồi Nhập Khẩu",
-    ],
-    "Thịt Tươi Sống": [
-        "Thịt Ba Chỉ Heo", "Thịt Bò Úc", "Ức Gà Phi Lê",
-        "Sườn Non Heo", "Cánh Gà Đông Lạnh", "Chân Giò Heo",
-    ],
-    "Rau Củ Quả": [
-        "Cà Chua Đà Lạt", "Khoai Tây Đà Lạt", "Xà Lách Xoong",
-        "Cải Thìa", "Bí Đỏ", "Dưa Leo", "Cam Sành", "Xoài Cát Chu",
-    ],
-}
- 
-DON_VI_OPTIONS = ["chai", "hộp", "gói", "kg", "thùng", "lon", "bó"]
- 
-CUSTOMER_COMPANY_NAMES = [
-    "Công ty TNHH Thương Mại Phú Thịnh", "Cửa Hàng Tạp Hóa Minh Anh",
-    "Siêu Thị Mini Gia Đình", "Công ty CP Bán Lẻ Việt Star",
-    "Cửa Hàng Thực Phẩm Sạch Xanh", "Công ty TNHH Dịch Vụ Ẩm Thực Hoa Mai",
-    "Nhà Hàng Sen Vàng", "Quán Ăn Ba Miền", "Công ty TNHH XNK Đại Phát",
-    "Cửa Hàng Tiện Lợi 24h", "Công ty CP Thương Mại Kim Long",
-    "Khách Sạn Hoàng Gia", "Công ty TNHH Bếp Việt", "Quán Cafe Sài Gòn Xưa",
-    "Cửa Hàng Bánh Ngọt Hạnh Phúc",
-]
- 
-QUOC_GIA_WEIGHTS = (["Việt Nam"] * 90 + ["Trung Quốc"] * 4 +
-                    ["Thái Lan"] * 3 + ["Nhật Bản"] * 2 + ["Hàn Quốc"] * 1)
- 
- 
-def _maBuuChinh() -> str:
-    return str(random.randint(70000, 96000))
- 
- 
-def _phoneCoDinh() -> str:
-    """Số điện thoại bàn dạng công ty, ví dụ 028xxxxxxxx."""
-    maVung = random.choice(["024", "028", "0236", "0251", "0272"])
-    return f"{maVung}{random.randint(1000000, 9999999)}"
- 
- 
-def _diaChiNgauNhien() -> str:
-    stNum = random.randint(1, 300)
-    street = random.choice(DUONG_PHO)
-    return f"Số {stNum} {street}"
-
-def getProductOrderEmployees(conn: psycopg.Connection) -> list[int]:
-    """
-    Trả về danh sách EmployeeID thuộc phòng "Quản Lý Sản Phẩm",
-    không bao gồm người giữ chức "Giám Đốc Sản Phẩm".
-    (chạy sau khi seedEmployees đã xong)
-    """
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT ep."EmployeeID"
-        FROM "EmployeeProfiles" ep
-        JOIN "Departments" d ON d."DepartmentID" = ep."DepartmentID"
-        WHERE d."DepartmentName" = %s
-          AND ep."ChucVu" <> %s
-    """, ("Quản Lý Sản Phẩm", "Giám Đốc Sản Phẩm"))
-    ids = [r[0] for r in cur.fetchall()]
-    if not ids:
-        raise ValueError(
-            "Không tìm thấy nhân viên phù hợp trong phòng 'Quản Lý Sản Phẩm'. "
-            "Kiểm tra lại tên phòng ban / chức vụ giám đốc trong DEPT_POSITIONS."
-        )
-    return ids
 
 # ---------------------------------------------------------------------------
 # Reset DB
 # ---------------------------------------------------------------------------
 
-def resetDatabase(conn: psycopg.Connection):
+def resetDatabase(conn: sqlite3.Connection):
     """Xóa toàn bộ bảng (HR mới + Northwind cũ) để tạo lại từ đầu."""
+    conn.execute("PRAGMA foreign_keys = OFF")
 
-    # PostgreSQL sẽ chuyển tên không có quote thành lowercase.
-    # Vì vậy phải dùng tên bảng lowercase để khớp với bảng thật trong public schema.
-    for t in ["Chathistory", "LeaveRequests", "Attendance", "SalaryHistory",
-              "BaseSalary", "EmployeeProfiles", "Employees", "Departments",
-              "Categories","Customers","Shippers","Suppliers","Products","Orders","OrderDetails"]:
-        conn.execute(f"DROP TABLE IF EXISTS \"{t}\" CASCADE")
+    # Xóa theo thứ tự phụ thuộc FK trước, sau đó drop hết
+    for t in ["ChatHistory", "LeaveRequests", "Attendance", "SalaryHistory",
+              "BaseSalary", "EmployeeProfiles", "Employees", "Departments"]:
+        conn.execute(f"DROP TABLE IF EXISTS [{t}]")
+
+    # Lấy tất cả bảng còn lại (nếu có từ lần chạy cũ)
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    existingTables = [r[0] for r in cur.fetchall()]
+    for t in existingTables:
+        conn.execute(f"DROP TABLE IF EXISTS [{t}]")
+
+    # Xóa toàn bộ index
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
+    for r in cur.fetchall():
+        conn.execute(f"DROP INDEX IF EXISTS [{r[0]}]")
+
     conn.commit()
-
-    print("  Đã xóa các bảng cũ (bao gồm Northwind).")
+    print(f"  Đã xóa {len(existingTables)} bảng cũ (bao gồm Northwind).")
 
 
 # ---------------------------------------------------------------------------
@@ -615,27 +417,26 @@ def makeTenViet(gender: str) -> str:
     return f"{ho} {dem} {ten}"
 
 
-def seedDepartments(conn: psycopg.Connection) -> dict:
+def seedDepartments(conn: sqlite3.Connection) -> dict:
     """Tạo 23 phòng ban. Trả về dict {tên: id}."""
     nameToId = {}
     for name, parent, cc in DEPARTMENTS:
         parentId = nameToId.get(parent)
         cur = conn.execute(
-            "INSERT INTO \"Departments\" (\"DepartmentName\", \"ParentDepartmentID\", \"CostCenter\") VALUES (%s, %s, %s) RETURNING \"DepartmentID\"",
+            "INSERT INTO Departments (DepartmentName, ParentDepartmentID, CostCenter) VALUES (?,?,?)",
             (name, parentId, cc)
         )
-        nameToId[name] = cur.fetchone()[0]
+        nameToId[name] = cur.lastrowid
     conn.commit()
     print(f"  Departments: {len(nameToId)} hàng")
     return nameToId
 
 
-def seedEmployees(conn: psycopg.Connection, deptNameToId: dict) -> list[int]:
+def seedEmployees(conn: sqlite3.Connection, deptNameToId: dict) -> list[int]:
     """
     Tạo 95 nhân viên + hồ sơ HR cho từng người.
     Trả về danh sách EmployeeID.
     """
-    cur = conn.cursor()
     topDeptNames = {"Ban Giám Đốc", "Kỹ Thuật", "Kinh Doanh", "Marketing",
                     "Tài Chính", "Nhân Sự", "Sản Phẩm"}
     leafDepts = [d for d in DEPARTMENTS if d[0] in DEPT_POSITIONS and d[0] not in topDeptNames]
@@ -677,13 +478,13 @@ def seedEmployees(conn: psycopg.Connection, deptNameToId: dict) -> list[int]:
         phone  = f"0{random.choice([32,33,34,35,36,37,38,56,58,70,76,77,78,79,89,90,93,94,96,97,98])}{random.randint(1000000,9999999)}"
         empRows.append((hoTen, gender, str(birth), addr, city, phone, str(hire)))
 
-    cur.executemany("""
-        INSERT INTO "Employees" ("HoTen", "GioiTinh", "NgaySinh", "DiaChi", "ThanhPho", "SoDienThoai", "NgayVaoLam")
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    conn.executemany("""
+        INSERT INTO Employees (HoTen, GioiTinh, NgaySinh, DiaChi, ThanhPho, SoDienThoai, NgayVaoLam)
+        VALUES (?,?,?,?,?,?,?)
     """, empRows)
     conn.commit()
 
-    cur = conn.execute("SELECT \"EmployeeID\", \"NgayVaoLam\" FROM \"Employees\" ORDER BY \"EmployeeID\"")
+    cur = conn.execute("SELECT EmployeeID, NgayVaoLam FROM Employees ORDER BY EmployeeID")
     allEmp = cur.fetchall()
     allIds = [r[0] for r in allEmp]
 
@@ -746,7 +547,7 @@ def seedEmployees(conn: psycopg.Connection, deptNameToId: dict) -> list[int]:
         status = weightedChoice(["ACTIVE", "RESIGNED", "PENDING_TERMINATION"], [93, 5, 2])
         ngayNghi = None
         if status in ("RESIGNED", "PENDING_TERMINATION"):
-            hd = ngayVao if ngayVao else date(2018, 1, 1)
+            hd = date.fromisoformat(ngayVao) if ngayVao else date(2018, 1, 1)
             ngayNghi = str(randomDate(hd + timedelta(days=180), date(2025, 1, 1)))
 
         empType  = weightedChoice(["FULL_TIME", "CONTRACT", "PROBATION"], [68, 22, 10])
@@ -768,13 +569,13 @@ def seedEmployees(conn: psycopg.Connection, deptNameToId: dict) -> list[int]:
             email, phoneWork, nguoiKC, acct, bank, mst, 12, 12
         ))
 
-    cur.executemany("""
-        INSERT INTO "EmployeeProfiles"
-        ("EmployeeID", "DepartmentID", "CCCD", "TinhTrangHonNhan", "LoaiHopDong", "TrangThaiLamViec",
-         "NgayVao", "NgayNghi", "ChucVu", "CapBac", "QuanLyTrucTiepID", "EmailCongTy",
-         "SoDienThoaiCongTy", "NguoiLienHeKhánCap", "SoTaiKhoanNganHang", "TenNganHang",
-         "MaSoThue", "SoNgayPhepNam", "SoNgayPhepBenh")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    conn.executemany("""
+        INSERT INTO EmployeeProfiles
+        (EmployeeID, DepartmentID, CCCD, TinhTrangHonNhan, LoaiHopDong, TrangThaiLamViec,
+         NgayVao, NgayNghi, ChucVu, CapBac, QuanLyTrucTiepID, EmailCongTy,
+         SoDienThoaiCongTy, NguoiLienHeKhánCap, SoTaiKhoanNganHang, TenNganHang,
+         MaSoThue, SoNgayPhepNam, SoNgayPhepBenh)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, profileRows)
     conn.commit()
 
@@ -783,13 +584,13 @@ def seedEmployees(conn: psycopg.Connection, deptNameToId: dict) -> list[int]:
     return allIds
 
 
-def seedBaseSalary(conn: psycopg.Connection, employeeIds: list[int]) -> dict:
+def seedBaseSalary(conn: sqlite3.Connection, employeeIds: list[int]) -> dict:
     """
     Tạo lịch sử lương cứng cho mỗi nhân viên.
     Mỗi người có 1–2 mốc: lương ban đầu (khi vào) + tăng lương 8% từ 01/01/2025.
     Trả về dict {EmployeeID: [(NgayHieuLuc, BaseSalaryID, LuongCoBan, diLai, anTrua, sucKhoe)]}.
     """
-    cur = conn.execute('SELECT "EmployeeID", "CapBac", "TrangThaiLamViec", "NgayVao" FROM "EmployeeProfiles"')
+    cur = conn.execute("SELECT EmployeeID, CapBac, TrangThaiLamViec, NgayVao FROM EmployeeProfiles")
     profiles = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
 
     rows = []
@@ -803,7 +604,7 @@ def seedBaseSalary(conn: psycopg.Connection, employeeIds: list[int]) -> dict:
         bMin, bMax, diLai, anTrua, sucKhoe = GRADE_SALARY[grade]
         luong2024 = round(random.uniform(bMin, bMax) / 500_000) * 500_000
 
-        joinDt = ngayVao if ngayVao else date(2018, 1, 1)
+        joinDt = date.fromisoformat(ngayVao) if ngayVao else date(2018, 1, 1)
         # Mốc 1: lương khi vào làm (hoặc đầu 2024 nếu vào trước đó)
         hieuLuc1 = max(joinDt, date(2024, 1, 1))
         rows.append((eid, str(hieuLuc1), luong2024, diLai, anTrua, sucKhoe, "Lương khởi điểm"))
@@ -813,18 +614,18 @@ def seedBaseSalary(conn: psycopg.Connection, employeeIds: list[int]) -> dict:
             luong2025 = round(luong2024 * 1.08 / 500_000) * 500_000
             rows.append((eid, "2025-01-01", luong2025, diLai, anTrua, sucKhoe, "Điều chỉnh lương năm 2025 (+8%)"))
 
-    cur.executemany("""
-        INSERT INTO "BaseSalary"
-        ("EmployeeID", "NgayHieuLuc", "LuongCoBan", "PhuCapDiLai", "PhuCapAnTrua", "PhuCapSucKhoe", "GhiChu")
-        VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING
+    conn.executemany("""
+        INSERT OR IGNORE INTO BaseSalary
+        (EmployeeID, NgayHieuLuc, LuongCoBan, PhuCapDiLai, PhuCapAnTrua, PhuCapSucKhoe, GhiChu)
+        VALUES (?,?,?,?,?,?,?)
     """, rows)
     conn.commit()
 
     # Trả về map để seedSalaryHistory dùng: {eid: [(hieuLuc, bsId, luong, diLai, anTrua, sucKhoe)]}
     cur = conn.execute("""
-        SELECT "BaseSalaryID", "EmployeeID", "NgayHieuLuc", "LuongCoBan",
-               "PhuCapDiLai", "PhuCapAnTrua", "PhuCapSucKhoe"
-        FROM "BaseSalary" ORDER BY "EmployeeID", "NgayHieuLuc"
+        SELECT BaseSalaryID, EmployeeID, NgayHieuLuc, LuongCoBan,
+               PhuCapDiLai, PhuCapAnTrua, PhuCapSucKhoe
+        FROM BaseSalary ORDER BY EmployeeID, NgayHieuLuc
     """)
     baseSalaryMap: dict[int, list] = {}
     for bsId, eid, hieuLuc, luong, dl, at, sk in cur.fetchall():
@@ -834,29 +635,27 @@ def seedBaseSalary(conn: psycopg.Connection, employeeIds: list[int]) -> dict:
     return baseSalaryMap
 
 
-def seedSalaryHistory(conn: psycopg.Connection, employeeIds: list[int], baseSalaryMap: dict):
+def seedSalaryHistory(conn: sqlite3.Connection, employeeIds: list[int], baseSalaryMap: dict):
     """
     Lương thực nhận hàng tháng Jan 2024 – Jun 2025.
     Lương cứng lấy từ BaseSalary theo NgayHieuLuc gần nhất của kỳ đó.
     Tăng ca và đi trễ lấy tổng từ bảng Attendance của tháng đó.
     """
-    cur = conn.execute('SELECT "EmployeeID", "TrangThaiLamViec", "NgayVao" FROM "EmployeeProfiles"')
+    cur = conn.execute("SELECT EmployeeID, TrangThaiLamViec, NgayVao FROM EmployeeProfiles")
     profiles = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
     # Tổng hợp chấm công theo (eid, year, month)
     cur = conn.execute("""
-        SELECT
-            "EmployeeID",
-            EXTRACT(YEAR FROM "NgayLamViec")::INTEGER AS Year,
-            EXTRACT(MONTH FROM "NgayLamViec")::INTEGER AS Month,
-            SUM(CASE WHEN "TrangThai" = 'PRESENT' THEN 1 ELSE 0 END) AS PresentDays,
-            SUM("SoPhutDiTre") AS TotalLateMinutes,
-            SUM("SoPhutTangCa") AS TotalOvertimeMinutes
-        FROM "Attendance"
-        GROUP BY
-            "EmployeeID",
-            EXTRACT(YEAR FROM "NgayLamViec"),
-            EXTRACT(MONTH FROM "NgayLamViec")
+        SELECT EmployeeID,
+               CAST(strftime('%Y', NgayLamViec) AS INTEGER),
+               CAST(strftime('%m', NgayLamViec) AS INTEGER),
+               SUM(CASE WHEN TrangThai = 'PRESENT' THEN 1 ELSE 0 END),
+               SUM(SoPhutDiTre),
+               SUM(SoPhutTangCa)
+        FROM Attendance
+        GROUP BY EmployeeID,
+                 strftime('%Y', NgayLamViec),
+                 strftime('%m', NgayLamViec)
     """)
     attMap: dict[tuple, tuple] = {}
     for eid, y, m, ngayLam, treGio, tangCa in cur.fetchall():
@@ -869,7 +668,7 @@ def seedSalaryHistory(conn: psycopg.Connection, employeeIds: list[int], baseSala
         if eid not in profiles or eid not in baseSalaryMap:
             continue
         status, ngayVao = profiles[eid]
-        joinDt = ngayVao if ngayVao else date(2018, 1, 1)
+        joinDt = date.fromisoformat(ngayVao) if ngayVao else date(2018, 1, 1)
         bsList = baseSalaryMap[eid]  # đã sắp xếp theo NgayHieuLuc tăng dần
 
         for year, month in periods:
@@ -881,7 +680,7 @@ def seedSalaryHistory(conn: psycopg.Connection, employeeIds: list[int], baseSala
 
             # Chọn BaseSalary có NgayHieuLuc <= đầu kỳ, gần nhất
             applicable = [(hl, bsId, l, dl, at, sk) for hl, bsId, l, dl, at, sk in bsList
-                          if hl <= periodStart]
+                          if hl <= str(periodStart)]
             if not applicable:
                 continue
             hieuLuc, bsId, luong, diLai, anTrua, sucKhoe = applicable[-1]
@@ -890,19 +689,20 @@ def seedSalaryHistory(conn: psycopg.Connection, employeeIds: list[int], baseSala
 
             # Phụ cấp tăng ca: 1.5× lương giờ cho số phút tăng ca
             luongGio   = luong / 22 / 8  # lương 1 giờ (22 ngày công, 8h/ngày)
-            phuCapTangCa = round(tangCaPhut / 60 * float(luongGio) * 1.5 / 10_000) * 10_000
+            phuCapTangCa = round(tangCaPhut / 60 * luongGio * 1.5 / 10_000) * 10_000
+
             # Khấu trừ đi trễ: trừ theo phút thực tế (tính theo lương giờ)
-            khauTruDiTre = round(treGioPhut / 60 * float(luongGio) / 10_000) * 10_000
+            khauTruDiTre = round(treGioPhut / 60 * luongGio / 10_000) * 10_000
 
             # Thưởng hiệu quả: 25% tháng có, mức 5–15% lương
-            thuong = round(random.uniform(float(luong) * 0.05, float(luong) * 0.15) / 100_000) * 100_000 if random.random() < 0.25 else 0
+            thuong = round(random.uniform(luong * 0.05, luong * 0.15) / 100_000) * 100_000 if random.random() < 0.25 else 0
 
             # Thuế TNCN đơn giản hóa (5% trên thu nhập > 11 triệu)
-            thuNhapTinh = float(luong) + float(thuong) - 11_000_000
-            khauTruThue = round(max(0, float(thuNhapTinh) * 0.05) / 10_000) * 10_000
+            thuNhapTinh = luong + thuong - 11_000_000
+            khauTruThue = round(max(0, thuNhapTinh * 0.05) / 10_000) * 10_000
 
             # BHXH nhân viên đóng 10.5%
-            bhxh = round(float(luong) * 0.105 / 10_000) * 10_000
+            bhxh = round(luong * 0.105 / 10_000) * 10_000
 
             net = (luong + diLai + anTrua + sucKhoe + thuong + phuCapTangCa
                    - khauTruDiTre - khauTruThue - bhxh)
@@ -914,25 +714,25 @@ def seedSalaryHistory(conn: psycopg.Connection, employeeIds: list[int], baseSala
     # Sắp xếp theo kỳ lương (năm, tháng) để SalaryID tăng dần theo thời gian
     rows.sort(key=lambda r: (r[2], r[3]))
 
-    cur.executemany("""
-        INSERT INTO "SalaryHistory"
-        ("EmployeeID", "BaseSalaryID", "NamKy", "ThangKy", "SoNgayLamViec", "SoPhutTreGioTong", "SoPhutTangCaTong",
-         "LuongCoBan", "PhuCapDiLai", "PhuCapAnTrua", "PhuCapSucKhoe", "ThuongHieuQua", "PhuCapTangCa",
-         "KhauTruDiTre", "KhauTruThue", "KhauTruBHXH", "LuongThucNhan", "NgayThanhToan")
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+    conn.executemany("""
+        INSERT OR IGNORE INTO SalaryHistory
+        (EmployeeID, BaseSalaryID, NamKy, ThangKy, SoNgayLamViec, SoPhutTreGioTong, SoPhutTangCaTong,
+         LuongCoBan, PhuCapDiLai, PhuCapAnTrua, PhuCapSucKhoe, ThuongHieuQua, PhuCapTangCa,
+         KhauTruDiTre, KhauTruThue, KhauTruBHXH, LuongThucNhan, NgayThanhToan)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, rows)
     conn.commit()
     print(f"  SalaryHistory: {len(rows)} hàng (18 tháng × ~{len(employeeIds)} nhân viên)")
 
 
-def seedAttendance(conn: psycopg.Connection, employeeIds: list[int]):
+def seedAttendance(conn: sqlite3.Connection, employeeIds: list[int]):
     """
     Chấm công T2–T6, giờ làm 9:00–18:00, Jan–Jun 2025.
     DiTre=1 chỉ khi đến sau 9:00, SoPhutDiTre > 0.
     DiTre=0 thì SoPhutDiTre = 0.
     Tăng ca khi ra sau 18:00.
     """
-    cur = conn.execute('SELECT "EmployeeID", "TrangThaiLamViec" FROM "EmployeeProfiles"')
+    cur = conn.execute("SELECT EmployeeID, TrangThaiLamViec FROM EmployeeProfiles")
     statusMap = {r[0]: r[1] for r in cur.fetchall()}
 
     start = date(2025, 1, 1)
@@ -1020,17 +820,17 @@ def seedAttendance(conn: psycopg.Connection, employeeIds: list[int]):
 
     batch = 5000
     for i in range(0, len(rows), batch):
-        cur.executemany("""
-            INSERT INTO "Attendance"
-            ("EmployeeID", "NgayLamViec", "GioVao", "GioRa", "HinhThucLam", "TrangThai",
-             "DiTre", "SoPhutDiTre", "SoPhutTangCa", "GhiChu")
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+        conn.executemany("""
+            INSERT OR IGNORE INTO Attendance
+            (EmployeeID, NgayLamViec, GioVao, GioRa, HinhThucLam, TrangThai,
+             DiTre, SoPhutDiTre, SoPhutTangCa, GhiChu)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
         """, rows[i:i+batch])
     conn.commit()
     print(f"  Attendance: {len(rows)} hàng (Jan–Jun 2025, 9h–18h, T2–T6)")
 
 
-def seedLeaveRequests(conn: psycopg.Connection, employeeIds: list[int]):
+def seedLeaveRequests(conn: sqlite3.Connection, employeeIds: list[int]):
     """
     Đơn nghỉ phép 2025 (từ 01/01/2025), đủ loại theo Luật Lao Động VN.
     Luồng thời gian đúng:
@@ -1040,23 +840,23 @@ def seedLeaveRequests(conn: psycopg.Connection, employeeIds: list[int]):
     Người duyệt: QuanLyTrucTiepID → trưởng phòng cùng dept → bất kỳ L5/L6.
     """
     cur = conn.execute("""
-        SELECT ep."EmployeeID", ep."QuanLyTrucTiepID", ep."DepartmentID"
-        FROM "EmployeeProfiles" ep
-        WHERE ep."TrangThaiLamViec" = 'ACTIVE'
+        SELECT ep.EmployeeID, ep.QuanLyTrucTiepID, ep.DepartmentID
+        FROM EmployeeProfiles ep
+        WHERE ep.TrangThaiLamViec = 'ACTIVE'
     """)
     activeEmps = cur.fetchall()
 
     # Map dept → danh sách manager (L4+) trong phòng đó
     deptManagers: dict[int, list[int]] = {}
     for eid, capBac, deptId in conn.execute(
-        'SELECT "EmployeeID", "CapBac", "DepartmentID" FROM "EmployeeProfiles" WHERE "TrangThaiLamViec"=\'ACTIVE\''
+        "SELECT EmployeeID, CapBac, DepartmentID FROM EmployeeProfiles WHERE TrangThaiLamViec='ACTIVE'"
     ):
         if capBac in ("L4", "L5", "L6"):
             deptManagers.setdefault(deptId, []).append(eid)
 
     # Fallback: bất kỳ L5/L6 nào trong công ty
     seniorPool = [eid for eid, cap, _ in conn.execute(
-        'SELECT "EmployeeID", "CapBac", "DepartmentID" FROM "EmployeeProfiles" WHERE "CapBac" IN (\'L5\',\'L6\') AND "TrangThaiLamViec"=\'ACTIVE\''
+        "SELECT EmployeeID, CapBac, DepartmentID FROM EmployeeProfiles WHERE CapBac IN ('L5','L6') AND TrangThaiLamViec='ACTIVE'"
     )]
 
     rows = []
@@ -1102,19 +902,18 @@ def seedLeaveRequests(conn: psycopg.Connection, employeeIds: list[int]):
     # Sắp xếp theo ngày nộp đơn (TaoLuc) để LeaveID tăng dần theo thời gian
     rows.sort(key=lambda r: r[9])
 
-    cur.executemany("""
-        INSERT INTO "LeaveRequests"
-        ("EmployeeID", "LoaiNghi", "NgayBatDau", "NgayKetThuc", "SoNgay",
-         "LyDo", "TrangThai", "DuyetBoi", "NgayDuyet", "TaoLuc")
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+    conn.executemany("""
+        INSERT INTO LeaveRequests
+        (EmployeeID, LoaiNghi, NgayBatDau, NgayKetThuc, SoNgay,
+         LyDo, TrangThai, DuyetBoi, NgayDuyet, TaoLuc)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
     """, rows)
     conn.commit()
     print(f"  LeaveRequests: {len(rows)} hàng")
 
 
-def seedChatHistory(conn: psycopg.Connection):
+def seedChatHistory(conn: sqlite3.Connection):
     """Lịch sử hội thoại AI mẫu bằng tiếng Việt."""
-    cur = conn.cursor()
     rows = []
     for i in range(45):
         sessionId = f"sess-{2025100 + i}"
@@ -1130,206 +929,28 @@ def seedChatHistory(conn: psycopg.Connection):
                          random.randint(30, 200), random.randint(80, 600),
                          random.randint(600, 6000), ts))
 
-    cur.executemany("""
-        INSERT INTO "ChatHistory"
-        ("SessionID", "NoiDungNguoiDung", "PhanHoiAI", "NhatKyCongCu",
-         "TokenDauVao", "TokenDauRa", "ThoiGianXuLyMs", "TaoLuc")
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+    conn.executemany("""
+        INSERT INTO ChatHistory
+        (SessionID, NoiDungNguoiDung, PhanHoiAI, NhatKyCongCu,
+         TokenDauVao, TokenDauRa, ThoiGianXuLyMs, TaoLuc)
+        VALUES (?,?,?,?,?,?,?,?)
     """, rows)
     conn.commit()
     print(f"  ChatHistory: {len(rows)} hàng")
 
 
-def updateHeadCounts(conn: psycopg.Connection):
+def updateHeadCounts(conn: sqlite3.Connection):
     """Cập nhật HeadCount theo số nhân viên ACTIVE mỗi phòng."""
     conn.execute("""
-        UPDATE "Departments" SET "HeadCount" = (
-            SELECT COUNT(*) 
-            FROM "EmployeeProfiles" ep
-            WHERE ep."DepartmentID" = "Departments"."DepartmentID"
-            AND ep."TrangThaiLamViec" = 'ACTIVE'
+        UPDATE Departments SET HeadCount = (
+            SELECT COUNT(*) FROM EmployeeProfiles ep
+            WHERE ep.DepartmentID = Departments.DepartmentID
+            AND ep.TrangThaiLamViec = 'ACTIVE'
         )
     """)
     conn.commit()
 
 
-
-def execute_schema(conn: psycopg.Connection, schema_sql: str):
-    """Chạy schema SQL theo từng câu lệnh để PostgreSQL có thể thực thi."""
-    statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
-    for stmt in statements:
-        conn.execute(stmt)
-    conn.commit()
-
-def seedCategories(conn: psycopg.Connection) -> dict:
-    """Tạo danh mục sản phẩm. Trả về dict TenDanhMuc -> CategoryID."""
-    cur = conn.cursor()
-    cur.executemany("""
-        INSERT INTO "Categories" ("TenDanhMuc", "MoTa")
-        VALUES (%s, %s)
-    """, CATEGORIES)
-    conn.commit()
- 
-    cur.execute('SELECT "CategoryID", "TenDanhMuc" FROM "Categories"')
-    nameToId = {name: cid for cid, name in cur.fetchall()}
-    print(f"  Categories: {len(nameToId)} danh mục")
-    return nameToId
-
-def seedSuppliers(conn: psycopg.Connection) -> list[int]:
-    """Tạo nhà cung cấp. Trả về danh sách SupplierID."""
-    cur = conn.cursor()
-    rows = []
-    for tenNCC in SUPPLIER_NAMES:
-        gender = random.choice(["Nam", "Nữ"])
-        tenLienHe = makeTenViet(gender)
-        city = random.choice(TINH_THANH)
-        rows.append((
-            tenNCC, tenLienHe, _diaChiNgauNhien(), city,
-            _maBuuChinh(), random.choices(QUOC_GIA_WEIGHTS)[0],
-            _phoneCoDinh(),
-        ))
- 
-    cur.executemany("""
-        INSERT INTO "Suppliers"
-        ("TenNhaCungCap", "TenNguoiLienHe", "DiaChi", "ThanhPho",
-         "MaBuuChinh", "QuocGia", "SoDienThoai")
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, rows)
-    conn.commit()
- 
-    cur.execute('SELECT "SupplierID" FROM "Suppliers" ORDER BY "SupplierID"')
-    ids = [r[0] for r in cur.fetchall()]
-    print(f"  Suppliers: {len(ids)} nhà cung cấp")
-    return ids
- 
-def seedShippers(conn: psycopg.Connection) -> list[int]:
-    """Tạo đơn vị vận chuyển. Trả về danh sách ShipperID."""
-    cur = conn.cursor()
-    rows = []
-    for ten in SHIPPER_NAMES:
-        phone = f"1900{random.randint(100000, 999999)}"
-        rows.append((ten, phone))
- 
-    cur.executemany("""
-        INSERT INTO "Shippers" ("TenNguoiGiaoHang", "SoDienThoai")
-        VALUES (%s, %s)
-    """, rows)
-    conn.commit()
- 
-    cur.execute('SELECT "ShipperID" FROM "Shippers" ORDER BY "ShipperID"')
-    ids = [r[0] for r in cur.fetchall()]
-    print(f"  Shippers: {len(ids)} đơn vị vận chuyển")
-    return ids
-
-def seedCustomers(conn: psycopg.Connection, count: int = 60) -> list[int]:
-    """Tạo khách hàng (công ty + cá nhân). Trả về danh sách CustomerID."""
-    cur = conn.cursor()
-    rows = []
-    for _ in range(count):
-        isCongTy = random.random() < 0.6
-        gender = random.choice(["Nam", "Nữ"])
-        tenLienHe = makeTenViet(gender)
-        if isCongTy:
-            tenKH = random.choice(CUSTOMER_COMPANY_NAMES)
-        else:
-            tenKH = tenLienHe  # khách hàng cá nhân dùng luôn tên làm TenKhachHang
- 
-        city = random.choice(TINH_THANH)
-        rows.append((
-            tenKH, tenLienHe, _diaChiNgauNhien(), city,
-            _maBuuChinh(), "Việt Nam",
-        ))
- 
-    cur.executemany("""
-        INSERT INTO "Customers"
-        ("TenKhachHang", "TenNguoiLienHe", "DiaChi", "ThanhPho",
-         "MaBuuChinh", "QuocGia")
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, rows)
-    conn.commit()
- 
-    cur.execute('SELECT "CustomerID" FROM "Customers" ORDER BY "CustomerID"')
-    ids = [r[0] for r in cur.fetchall()]
-    print(f"  Customers: {len(ids)} khách hàng")
-    return ids
-
-def seedProducts(conn: psycopg.Connection, categoryNameToId: dict,
-                  supplierIds: list[int]) -> list[int]:
-    """Tạo sản phẩm cho từng danh mục. Trả về danh sách ProductID."""
-    cur = conn.cursor()
-    rows = []
-    for tenDanhMuc, productNames in PRODUCT_NAMES_BY_CATEGORY.items():
-        categoryId = categoryNameToId[tenDanhMuc]
-        for tenSP in productNames:
-            supplierId = random.choice(supplierIds)
-            donVi = random.choice(DON_VI_OPTIONS)
-            gia = round(random.uniform(8000, 450000), -2)  # làm tròn hàng trăm
-            rows.append((tenSP, supplierId, categoryId, donVi, gia))
- 
-    cur.executemany("""
-        INSERT INTO "Products"
-        ("TenSanPham", "SupplierID", "CategoryID", "DonVi", "Gia")
-        VALUES (%s, %s, %s, %s, %s)
-    """, rows)
-    conn.commit()
- 
-    cur.execute('SELECT "ProductID" FROM "Products" ORDER BY "ProductID"')
-    ids = [r[0] for r in cur.fetchall()]
-    print(f"  Products: {len(ids)} sản phẩm")
-    return ids
-
-def seedOrders(conn: psycopg.Connection, customerIds: list[int],
-               shipperIds: list[int], count: int = 300) -> list[int]:
-    """
-    Tạo đơn hàng. EmployeeID chỉ lấy trong số nhân viên phòng
-    "Quản Lý Sản Phẩm" (trừ Giám Đốc Sản Phẩm).
-    """
-    productOrderEmployeeIds = getProductOrderEmployees(conn)
- 
-    cur = conn.cursor()
-    rows = []
-    for _ in range(count):
-        customerId = random.choice(customerIds)
-        employeeId = random.choice(productOrderEmployeeIds)
-        shipperId = random.choice(shipperIds)
-        ngayDat = randomDate(date(2022, 1, 1), date(2025, 12, 31))
-        gio = f"{random.randint(8, 19):02d}:{random.randint(0, 59):02d}:00"
-        rows.append((customerId, employeeId, f"{ngayDat} {gio}", shipperId))
- 
-    cur.executemany("""
-        INSERT INTO "Orders"
-        ("CustomerID", "EmployeeID", "NgayDatHang", "ShipperID")
-        VALUES (%s, %s, %s, %s)
-    """, rows)
-    conn.commit()
- 
-    cur.execute('SELECT "OrderID" FROM "Orders" ORDER BY "OrderID"')
-    ids = [r[0] for r in cur.fetchall()]
-    print(f"  Orders: {len(ids)} đơn hàng "
-          f"(EmployeeID lấy từ {len(productOrderEmployeeIds)} nhân viên Quản Lý Sản Phẩm)")
-    return ids
-
-def seedOrderDetails(conn: psycopg.Connection, orderIds: list[int],
-                      productIds: list[int]) -> None:
-    """Tạo chi tiết đơn hàng: 1–5 dòng sản phẩm cho mỗi đơn."""
-    cur = conn.cursor()
-    rows = []
-    for orderId in orderIds:
-        soDong = random.randint(1, 5)
-        chosenProducts = random.sample(
-            productIds, k=min(soDong, len(productIds))
-        )
-        for productId in chosenProducts:
-            quantity = random.randint(1, 50)
-            rows.append((orderId, productId, quantity))
- 
-    cur.executemany("""
-        INSERT INTO "OrderDetails" ("OrderID", "ProductID", "Quantity")
-        VALUES (%s, %s, %s)
-    """, rows)
-    conn.commit()
-    print(f"  OrderDetails: {len(rows)} dòng chi tiết đơn hàng")
- 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1338,23 +959,16 @@ def main():
     """Điểm khởi đầu — chạy toàn bộ pipeline seed."""
     random.seed(42)
 
-    print(f"\nKết nối tới: Datapilot")
-    conn = psycopg.connect(
-        host="localhost",
-        dbname="postgres",
-        user="postgres",
-        password="12345678",
-        port=5432
-    )
+    print(f"\nKết nối tới: {DB_PATH}")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
 
     print("\n[1/7] Xóa dữ liệu cũ...")
     resetDatabase(conn)
 
-    cur = conn.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname='public'")
-    print(f"  Số bảng hiện có: {cur.fetchone()[0]}")
-
     print("\n[2/7] Tạo schema...")
-    conn.execute(SCHEMA_SQL)
+    conn.executescript(SCHEMA_SQL)
     conn.commit()
 
     print("\n[3/8] Seed Departments...")
@@ -1377,31 +991,15 @@ def main():
     seedChatHistory(conn)
 
     updateHeadCounts(conn)
-
-    categoryNameToId = seedCategories(conn)
-    supplierIds = seedSuppliers(conn)
-    shipperIds = seedShippers(conn)
-    customerIds = seedCustomers(conn)
-    productIds = seedProducts(conn, categoryNameToId, supplierIds)
-    orderIds = seedOrders(conn, customerIds, shipperIds)
-    seedOrderDetails(conn, orderIds, productIds)
-
     conn.close()
 
-
     print("\nSeed hoàn tất. Kết quả:")
-    conn2 = psycopg.connect(
-        host="localhost",
-        dbname="postgres",
-        user="postgres",
-        password="12345678",
-        port=5432
-    )
+    conn2 = sqlite3.connect(DB_PATH)
     cur = conn2.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname='public'"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     )
     for t in [r[0] for r in cur.fetchall()]:
-        count = conn2.execute(f"SELECT COUNT(*) FROM \"{t}\"").fetchone()[0]
+        count = conn2.execute(f"SELECT COUNT(*) FROM [{t}]").fetchone()[0]
         print(f"  {t:<35} {count:>8,} hàng")
     conn2.close()
 

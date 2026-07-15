@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
 
-    database_path: str = "postgresql://postgres:12345678@localhost:5432/postgres"
+    database_path: str = "./data/datapilot.db"
 
     anthropic_api_key: str = ""
     claude_model: str = "claude-haiku-4-5-20251001"
